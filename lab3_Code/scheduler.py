@@ -1,11 +1,9 @@
-GRAPH = []
-
-
 import sys
 import math
 from sys import stdin, stdout
 from datetime import datetime
 from collections import deque
+import pygraphviz as pgv
 
 # BUF_SIZE = 1024 # used for reading a fixed buffer size
 BUF_SIZE = 4096  # used for reading a fixed buffer size
@@ -52,12 +50,335 @@ MemOp_Head = None
 operations = ["load", "store", "loadI", "add", "sub", "mult",
               "lshift", "rshift", "output", "nop", "constant", "register",
               "comma", "into", "endfile"]
-
-
 # operations = [0 "LOAD", 1 "STORE",2 "LOADI",3 "ADD",4 "SUB", 5"MULT",
 #               6 "LSHIFT", 7 "RSHIFT", 8 "OUTPUT", 9 "NOP",
 #               10 "CONSTANT", 11 "REGISTER", 12 "COMMA", 13"INTO", 14"ENDFILE"]
 
+
+################ CONSTANTS ABOVE ARE FROM FIRST 2 LABS  #####################
+
+# Flags:
+# -v -- used to generate Graphviz-compatible file
+# -h -- help
+#
+#
+# QUESTIONS:
+# we can have multiple dependence graphs in one block, correct?
+# do we use the same input ILOC from lab1 or 2?
+#
+#
+#
+# TESTING:
+# use lab3 simulator to:
+# -test if you have right number of nops
+# -
+#
+#
+# Todo:
+# Remove any NOP's
+
+def_line = []
+# keeps track of the line that each virtual register was defined on
+
+GRAPH = pgv.AGraph(strict = True, directed=True)
+
+LATENCY = [3, 3, 1, 1,1,1,1,1,1,1]
+
+NODE_OPCODES = [] # tells us the corresponding opcode of each node
+priorities = [] # priorities of each of the nodes
+
+ROOT = None
+
+NODE_TO_OP = []
+
+vr_val_map = {}
+
+######## CONSTANTS ABOVE ARE FROM LAB 3 #########
+
+
+def track_operation(ir_op):
+    """
+    Will track all of the values in virtual registers. 
+    Will NOT track the values in primary memory. 
+    
+    :param ir_op: ir object
+    :return: 
+    """
+    global vr_val_map
+    operation_map = {}
+    operation_map[3] = (lambda x,y: x + y)
+    operation_map[4] = (lambda x,y: x - y)
+    operation_map[5] = (lambda x,y: x * y)
+    operation_map[6] = (lambda x,y: x << y)
+    operation_map[7] = (lambda x,y: x >> y)
+
+    if ir_op.opcode in [8,9,1,0]:
+        ir_data = ir_op.ir_data
+        # defines some vr
+        for i in get_defined(ir_op.opcode):
+            vr_val_map[ir_data[i + 1]] = None
+    else:
+        for i in get_defined(ir_op.opcode):
+            uses = get_defined(ir_op.opcode)
+            not_def = False
+            for j in uses:
+                if vr_val_map[ir_data[j + 1]] == None:
+                    vr_val_map[ir_data[i + 1]] = None
+                    not_def = True
+            if not not_def:
+                # all these operations are binary
+                vr_val_map[ir_data[i + 1]] = operation_map[ir_op.opcode]\
+                    (vr_val_map[uses[0]],vr_val_map[uses[1]])
+
+
+def main():
+    """
+    Will appropriately read in the file arguments and run the operation that we 
+    want. This might be to run on a single file, or a directory of files. 
+    We can do any one of the following operations: 
+    -print help options
+    -print out all tokens and lexical errors
+    -scan and parse
+    -scan, parse, and print out the intermediate representation
+    :return: 
+    """
+    global verbose, flag_level, f, char, EOF, k, MAXLIVE, IrHead, checking
+    numArgs = len(sys.argv)
+
+    if "-v" in sys.argv:
+        flag_level = 2
+    if "-h" in sys.argv:
+        flag_level = 0
+
+    if numArgs < 2 or numArgs > 4 or flag_level == 0:
+        print("Note: invoke schedule as follows:"
+              "schedule -v(optional) <filename> or \n schedule <filename>")
+        print("Valid flags are -h for help, -v to generate a graphviz dot file")
+        # print out help statement
+        return
+
+
+    f = open(sys.argv[-1], 'r')
+
+    init_double_buf()
+    parse()
+    rename()  # do the renaming regardless
+
+def lab3():
+    global NODE_OPCODES, MAX_VR
+    NODE_OPCODES = [None] * (MAX_VR + 1)
+    if flag_level == 1:
+        schedule()
+    else:
+        cons_graph_viz()
+
+def cons_graph_viz():
+    global GRAPH
+    cons_graph()
+    outputFile = open("dotOutput.txt", 'w')
+    # write to file
+    pgv.draw("dotOutput.txt", 'dot')
+
+
+def insert_memop_list(list_node):
+    """"""
+    global MemOp_Head, MemOp_Tail
+    if not MemOp_Head:
+        MemOp_Head = list_node
+        MemOp_Tail = list_node
+        list_node.next = None
+        list_node.prev = None
+    else:
+        MemOp_Tail.link_next(list_node)
+        MemOp_Tail = list_node
+        MemOp_Tail.next = None
+
+def find_roots():
+    """
+    Finds the roots of the graph
+    :return: list of roots in the graph
+    """
+    global GRAPH
+    changed = True
+    nodes = set(GRAPH.nodes())
+
+    while changed:
+        changed = False
+        original_size = nodes.number_of_nodes()
+
+        for n in nodes:
+            neighbors = pgv.neighbors(n)
+            nodes.difference(neighbors)
+            new_size = nodes.number_of_nodes()
+            if new_size != original_size:
+                changed = True
+                break
+
+    return nodes # this now contains the set of roots
+
+
+def latency_weighted_bfs(root):
+    global GRAPH, priorities, NODE_OPCODES, LATENCY
+    queue = deque()
+    queue.append(root)
+    weights = {}
+    explored = {}
+    weights[root] = 0
+    priorities[root] = 0
+    explored[root] = True
+
+    while queue:
+        curr = queue.pop()
+        for :
+            # for each of the neighbors
+            if :
+                if :
+                    # check if this node already has a priority, and if so
+                    # if we've found a smaller one
+
+def transform_one_root():
+    """
+    Will transform the graph so that there's only one root. 
+    Will also return the root of the graph.
+    :return: 
+    """
+    global tot_block_len, GRAPH
+    roots = find_roots()
+    if len(roots) == 1:
+        return roots[0]
+    if len(roots) < 1:
+        print("ERROR: graph doesn't have any roots")
+        return None
+    new_root = tot_block_len + 1
+    # TODO: map the new root to its operation (a NOP) in here
+    for root in roots:
+        GRAPH.add_edge(new_root, root)
+
+    return new_root
+
+# add an edge to each of the roots, so that we only have one root
+
+
+def calc_priorities():
+    """
+    Calculates the priorities of each node
+    :return: 
+    """
+
+
+
+
+def cons_graph():
+    global IrHead, GRAPH, priorities, NODE_OPCODES
+    curr = IrHead
+    op_name = 0
+
+    while curr:
+        track_operation(curr) # we do this to keep track of our VR values
+
+        curr_data = curr.ir_data
+        if curr.opcode == 9:
+            curr = curr.next
+            continue
+        for i in get_defined(curr.opcode):
+            for j in get_used(curr.opcode):
+                GRAPH.add_edge(curr.line_num, def_line[curr_data[j + 1]])
+                # Add a directed edge between these two
+
+        NODE_OPCODES[op_name] = curr.opcode
+        priorities.append(None)
+        if curr.opcode in [0,1,8]: # these are the opcodes of the memory-related operations
+            temp_curr = curr
+            curr = curr.next
+            insert_memop_list(temp_curr)
+        else:
+            curr = curr.next
+            op_name += 1
+
+def check_memop_dependences():
+    global MemOp_Head, vr_val_map
+    curr = MemOp_Head
+
+    # Key: load = 0, store = 1, output = 2. Same = 0, Distinct = 1, Unknown = 2
+    conflict_table = {}
+    conflict_table.append([[False, False, False],[True, False, True],[False, False, False]])
+    conflict_table.append([[True, False, True],[True, False, True],[True, False, True]])
+    conflict_table.append([[False, False, False],[True, False, True],[True, True, True]])
+    # should correspond to the 3x3x3 table in lecture
+
+    # [False, False, False] # LL, LO, OL
+    # [True, False, True] # SL AND SO, SS, LS and OS
+    # [True, True, True] # OO
+
+    #  this table is here to help us check if there are conflicts or not.
+    # if we want to match the slides, then we need a 3D table
+
+    while curr:
+        other = curr.next
+        curr_defined = get_defined(curr.opcode)
+        curr_vr_val = vr_val_map[curr.ir_data[curr_defined[0] + 1]]
+        while other:
+            known = 1
+            other = other.next
+            # check for a conflict
+            other_defined = get_defined(other.opcode)
+            other_vr_val = vr_val_map[other.ir_data[other_defined[0] + 1]]
+            if not other_vr_val:
+                known = 2
+            elif curr_vr_val == other_vr_val:
+                known = 0
+
+            if conflict_table[curr.opcode][other.opcode][known]:
+                GRAPH.add_edge(curr.line_num, other.line_num)
+        curr = curr.next
+
+# def assign_priorities():
+
+def get_leaves():
+    """
+    find all the leaves of the graph
+    :return: a list of leaves
+    """
+    global GRAPH
+
+
+def remove_from_ready(ready_set):
+    """"""
+
+
+def list_schedule():
+    global LATENCY, MAX_VR, NODE_OPCODES
+    cycle = 1
+    ready = deque()
+    active = set()
+    starts = [None] * (MAX_VR + 1)
+
+    while ready and active:
+        for i in active:
+            opcode = NODE_OPCODES[i]
+            if starts[i] + LATENCY[opcode] < cycle:
+                active.remove(i)
+                # check if each of the successors are ready
+                for :
+                    if:
+
+        if len(ready) <= 0:
+            op = remove_next_op(ready)
+            starts[op] = cycle
+            active.add(op)
+
+        cycle += 1
+
+
+def schedule():
+    cons_graph()
+    list_schedule()
+
+
+
+#########################################################
+######    ALL CODE BELOW HERE IS FOR THE RENAMING PORTION ###########
+#########################################################
 
 class IRArray:
     def __init__(self, opcode, int1, int2, int3):
@@ -77,6 +398,7 @@ class IRArray:
         """
         self.opcode = opcode
         self.ir_data = []
+        self.line_num = -1  # used for scheduling
         for i in range(12):
             self.ir_data.append(None)
         self.ir_data[0] = int1
@@ -200,7 +522,6 @@ class IRArray:
         self.next.prev = self.prev
         self.prev.next = self.next
 
-
 def print_ir():
     """
     Prints out the intermediate representation in an 
@@ -218,112 +539,6 @@ def print_ir():
         # print(total_output)
 
 
-def main():
-    """
-    Will appropriately read in the file arguments and run the operation that we 
-    want. This might be to run on a single file, or a directory of files. 
-    We can do any one of the following operations: 
-    -print help options
-    -print out all tokens and lexical errors
-    -scan and parse
-    -scan, parse, and print out the intermediate representation
-    :return: 
-    """
-    global verbose, flag_level, f, char, EOF, k, MAXLIVE, IrHead, checking
-    numArgs = len(sys.argv)
-
-    if "-v" in sys.argv:
-        flag_level = 2
-    if "-h" in sys.argv:
-        flag_level = 0
-
-    if numArgs < 2 or numArgs > 4 or flag_level == 0:
-        print("Note: invoke schedule as follows:"
-              "schedule -v(optional) <filename> or \n schedule <filename>")
-        print("Valid flags are -h for help, -v to generate a graphviz dot file")
-        # print out help statement
-        return
-
-
-    f = open(sys.argv[-1], 'r')
-
-    init_double_buf()
-    parse()
-    rename()  # do the renaming regardless
-    if flag_level == 1:
-        schedule()
-    else:
-        cons_graph_viz()
-
-
-
-def cons_graph_viz():
-    global GRAPH
-    cons_graph()
-    outputFile = open("dotOutput.txt", 'w')
-    # write to file
-
-def insert_memop_list(list_node):
-    """"""
-    global MemOp_Head, MemOp_Tail
-    if not MemOp_Head:
-        MemOp_Head = list_node
-        MemOp_Tail = list_node
-        list_node.next = None
-        list_node.prev = None
-    else:
-        MemOp_Tail.link_next(list_node)
-        MemOp_Tail = list_node
-        MemOp_Tail.next = None
-
-def cons_graph():
-    global IrHead, GRAPH
-    curr = IrHead
-    while curr:
-        curr_data = curr.ir_data
-        for i in get_defined(curr.opcode):
-
-            for i in get_used(curr.opcode):
-                # Add a directed edge between these two
-
-        if curr.opcode in [0,1,8]: # these are the opcodes of the memory-related operations
-            temp_curr = curr
-            curr = curr.next
-            insert_memop_list(temp_curr)
-        else:
-            curr = curr.next
-
-def check_memop_dependences():
-    global MemOp_Head
-    curr = MemOp_Head
-    # Key: load = 0, store = 1, output = 2. Same = 0, Distinct = 1, Unknown = 2
-    # conflict_table = []
-
-    # [False, False, False] # LL, LO, OL
-    # [True, False, True] # SL AND SO, SS, LS and OS
-    # [True, True, True] # OO
-
-    #  this table is here to help us check if there are conflicts or not.
-    # if we want to match the slides, then we need a 3D table
-
-    while curr:
-        other = curr.next
-        while other:
-            other = other.next
-            # check for a conflict
-
-        curr = curr.next
-# def assign_priorities():
-
-def list_scheduler():
-
-def schedule():
-    cons_graph()
-
-
-#########################################################
-######    ALL CODE BELOW HERE IS FOR THE RENAMING PORTION ###########
-#########################################################
 
 def rename():
     """
@@ -331,7 +546,7 @@ def rename():
         Will print out the output. 
     :return: 
     """
-    global IrHead, IrTail, MAXLIVE, MAX_VR, k
+    global IrHead, IrTail, MAXLIVE, MAX_VR, k, def_line, tot_block_len
     SrToVr = []
     LU = []
 
@@ -349,13 +564,12 @@ def rename():
 
     index = tot_block_len
     while curr != None:
+        # iterate from back to front
         curr_arr = curr.ir_data
         # look through all the operands that we define first
 
         defined = get_defined(curr.opcode)
         for j in defined:
-            # if verbose:
-            #     print("current register: %d" % curr_arr[j])
             if SrToVr[curr_arr[j]] == -1:
                 curr_max -= 1
                 # if we hit the definition of the SR, then we decrement curr_max
@@ -386,6 +600,12 @@ def rename():
             curr_arr[j + 1] = SrToVr[curr_arr[j]]  # virtual register
             curr_arr[j + 3] = LU[curr_arr[j]]  # next use
             LU[curr_arr[j]] = index
+
+
+        setattr(curr, "line_num", index)
+        def_line.append(index)
+        # we execute these two lines above for the sake
+        # of our scheduler's dependence graph construction
 
         # after we've looked thru uses and def's, then we check if
         # MAXLIVE has changed
