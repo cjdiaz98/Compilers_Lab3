@@ -80,21 +80,47 @@ operations = ["load", "store", "loadI", "add", "sub", "mult",
 def_line = []
 # keeps track of the line that each virtual register was defined on
 
-GRAPH = pgv.AGraph(strict = True, directed=True)
+# GRAPH = pgv.AGraph(strict = True, directed=True)
+GRAPH = defaultdict(list)
 
 LATENCY = [3, 3, 1, 1,1,1,1,1,1,1]
 
-NODE_OPCODES = [] # tells us the corresponding opcode of each node
+NODE_OPS = []
+# this is the array containing all the IR's for each operation
+# theoretically each IR should contain as line_num the index that holds it in this array
+
 priorities = [] # priorities of each of the nodes
 
 ROOT = None
 
-NODE_TO_OP = []
+OP_PARENTS_NUM = []
+# array containing the number of parents for each operation
 
 vr_val_map = {}
 
 ######## CONSTANTS ABOVE ARE FROM LAB 3 #########
+###########  BELOW CODE BELONGS TO LAB 3    #####################
 
+def check_node_ops():
+    global NODE_OPS
+    for i in range(len(NODE_OPS)):
+        if NODE_OPS[i].line_num != i:
+            print("Operation %d  doesn't match its contained IR, which says %d"
+                  % (i, NODE_OPS[i].line_num))
+
+
+###########  ABOVE IS CODE WE USE TO CHECK OUR DATA STRUCTURES    #####################
+
+def cons_dot_file():
+    # https: // stackoverflow.com / questions / 23734030 / how - can - python - write - a - dot-file-for -graphviz - asking -for -some-edges-to-be-colored
+    with open('/tmp/graph.dot', 'w') as out:
+        for line in ('digraph G {', 'size="16,16";', 'splines=true;'):
+            out.write('{}\n'.format(line))
+        for start, d in nestedg.items():
+            for end, weight in d.items():
+                out.write(
+                    '{} -> {} [ label="{}" ];\n'.format(start, end, weight))
+        out.write('}\n')
 
 def track_operation(ir_op):
     """
@@ -165,8 +191,11 @@ def main():
     rename()  # do the renaming regardless
 
 def lab3():
-    global NODE_OPCODES, MAX_VR
-    NODE_OPCODES = [None] * (MAX_VR + 1)
+    global NODE_OPCODES, tot_block_len, OP_PARENTS_NUM, priorities
+    OP_PARENTS_NUM = [0] * (tot_block_len + 2)
+    NODE_OPS = [None] * (tot_block_len + 2)
+    priorities = [-1] * (tot_block_len + 2)
+    # make 1 extra slot just in case we have to make a new root
     if flag_level == 1:
         schedule()
     else:
@@ -177,6 +206,7 @@ def cons_graph_viz():
     cons_graph()
     outputFile = open("dotOutput.txt", 'w')
     # write to file
+    pgv_graph = pgv.AGraph(GRAPH) # todo
     pgv.draw("dotOutput.txt", 'dot')
 
 
@@ -200,7 +230,7 @@ def find_roots():
     """
     global GRAPH
     changed = True
-    nodes = set(GRAPH.nodes())
+    nodes = set(GRAPH.keys())
 
     while changed:
         changed = False
@@ -217,42 +247,28 @@ def find_roots():
     return nodes # this now contains the set of roots
 
 
-def latency_weighted_bfs(root):
-    global GRAPH, priorities, NODE_OPCODES, LATENCY
-    queue = deque()
-    queue.append(root)
-    weights = {}
-    explored = {}
-    weights[root] = 0
-    priorities[root] = 0
-    explored[root] = True
-
-    while queue:
-        curr = queue.pop()
-        for :
-            # for each of the neighbors
-            if :
-                if :
-                    # check if this node already has a priority, and if so
-                    # if we've found a smaller one
-
 def transform_one_root():
     """
     Will transform the graph so that there's only one root. 
     Will also return the root of the graph.
     :return: 
     """
-    global tot_block_len, GRAPH
+    global tot_block_len, GRAPH, NODE_OPS, tot_block_len
     roots = find_roots()
     if len(roots) == 1:
         return roots[0]
     if len(roots) < 1:
         print("ERROR: graph doesn't have any roots")
         return None
+
+    root_op = IRArray(9, None, None, None)
+    setattr(root_op, "line_num", tot_block_len + 1)
+    NODE_OPS[tot_block_len + 1] = root_op
+
     new_root = tot_block_len + 1
     # TODO: map the new root to its operation (a NOP) in here
     for root in roots:
-        GRAPH.add_edge(new_root, root)
+        GRAPH[new_root].append(root)
 
     return new_root
 
@@ -261,17 +277,40 @@ def transform_one_root():
 
 def calc_priorities():
     """
-    Calculates the priorities of each node
+    Calculates the priorities of each node. 
+    Runs a latency weighted BFS. 
     :return: 
     """
+    global GRAPH, priorities, OP_PARENTS_NUM, LATENCY, NODE_OPS
+    # We need to do the necessary checks to make sure that we don't establish
+    # an operation's latency until we've visited every one of its parents
 
+    q = deque()
+    q.append(ROOT)
+    parents_num = list.copy(OP_PARENTS_NUM)
+    priorities[ROOT] = 0
 
+    while q:
+        parent = q.popleft()
+        neighbors = GRAPH[parent]
+        ir = NODE_OPS[parent]
+
+        for k in neighbors:
+            n = int(k)
+            parents_num[n] -= 1
+            if parents_num[n] == 0:
+                q.append(n)
+            if parents_num[n] < 0:
+                print("Error: this value shouldn't be negative")
+            new_weight = priorities[parent] + LATENCY[ir.opcode]
+
+            if priorities[n] < new_weight:
+                priorities[n] = new_weight
 
 
 def cons_graph():
-    global IrHead, GRAPH, priorities, NODE_OPCODES
+    global IrHead, GRAPH, priorities, NODE_OPS, def_line, ROOT
     curr = IrHead
-    op_name = 0
 
     while curr:
         track_operation(curr) # we do this to keep track of our VR values
@@ -282,18 +321,24 @@ def cons_graph():
             continue
         for i in get_defined(curr.opcode):
             for j in get_used(curr.opcode):
-                GRAPH.add_edge(curr.line_num, def_line[curr_data[j + 1]])
+                GRAPH[curr.line_num].append(def_line[curr_data[j + 1]])
                 # Add a directed edge between these two
 
-        NODE_OPCODES[op_name] = curr.opcode
-        priorities.append(None)
-        if curr.opcode in [0,1,8]: # these are the opcodes of the memory-related operations
+                OP_PARENTS_NUM[def_line[curr_data[j + 1]]] += 1
+                # increment its parents count
+
+        NODE_OPS[curr.line_num] = curr
+
+        if curr.opcode in [0,1,8]:
+            # these are the opcodes of the memory-related operations
+            # we need to store them in a separate LL for later processing
             temp_curr = curr
             curr = curr.next
             insert_memop_list(temp_curr)
         else:
             curr = curr.next
-            op_name += 1
+    check_memop_dependences()
+    ROOT = transform_one_root()
 
 def check_memop_dependences():
     global MemOp_Head, vr_val_map
@@ -329,33 +374,39 @@ def check_memop_dependences():
                 known = 0
 
             if conflict_table[curr.opcode][other.opcode][known]:
-                GRAPH.add_edge(curr.line_num, other.line_num)
+                GRAPH[curr.line_num].append(other.line_num)
         curr = curr.next
 
 # def assign_priorities():
 
-def get_leaves():
-    """
-    find all the leaves of the graph
-    :return: a list of leaves
-    """
-    global GRAPH
-
+# def get_leaves():
+#     """
+#     find all the leaves of the graph
+#     :return: a list of leaves
+#     """
+#     global GRAPH
+# todo: DO WE NEED THIS??
 
 def remove_from_ready(ready_set):
     """"""
 
 
 def list_schedule():
-    global LATENCY, MAX_VR, NODE_OPCODES
+    global LATENCY, MAX_VR
     cycle = 1
     ready = deque()
     active = set()
     starts = [None] * (MAX_VR + 1)
 
+    # Two functional units: f0 and f1
+    # only f0 can execute load and store
+    # only f1 can execute mul
+    # only one output operation per cycle
+
     while ready and active:
         for i in active:
-            opcode = NODE_OPCODES[i]
+            # get the opcode here
+
             if starts[i] + LATENCY[opcode] < cycle:
                 active.remove(i)
                 # check if each of the successors are ready
