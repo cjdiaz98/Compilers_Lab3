@@ -4,6 +4,7 @@ from sys import stdin, stdout
 from datetime import datetime
 from collections import deque
 import pygraphviz as pgv
+from heapq import *
 
 # BUF_SIZE = 1024 # used for reading a fixed buffer size
 BUF_SIZE = 4096  # used for reading a fixed buffer size
@@ -82,6 +83,8 @@ def_line = []
 
 # GRAPH = pgv.AGraph(strict = True, directed=True)
 GRAPH = defaultdict(list)
+REV_GRAPH = defaultdict(list)
+
 
 LATENCY = [3, 3, 1, 1,1,1,1,1,1,1]
 
@@ -90,13 +93,20 @@ NODE_OPS = []
 # theoretically each IR should contain as line_num the index that holds it in this array
 
 priorities = [] # priorities of each of the nodes
+predecessor_count = [] # keeps track of how many successors each node has
+
 
 ROOT = None
 
 OP_PARENTS_NUM = []
 # array containing the number of parents for each operation
 
+OP_CHILDREN_NUM = []
+# array containing the number of children for each operation
+
 vr_val_map = {}
+
+func_unit = [0,1]
 
 ######## CONSTANTS ABOVE ARE FROM LAB 3 #########
 ###########  BELOW CODE BELONGS TO LAB 3    #####################
@@ -191,9 +201,11 @@ def main():
     rename()  # do the renaming regardless
 
 def lab3():
-    global NODE_OPCODES, tot_block_len, OP_PARENTS_NUM, priorities
+    global NODE_OPS, tot_block_len, OP_PARENTS_NUM, \
+        priorities, predecessor_count
     OP_PARENTS_NUM = [0] * (tot_block_len + 2)
     NODE_OPS = [None] * (tot_block_len + 2)
+    predecessor_count = [-1] * (tot_block_len + 2)
     priorities = [-1] * (tot_block_len + 2)
     # make 1 extra slot just in case we have to make a new root
     if flag_level == 1:
@@ -279,9 +291,10 @@ def calc_priorities():
     """
     Calculates the priorities of each node. 
     Runs a latency weighted BFS. 
+    Also will count the number of successors that each node has. 
     :return: 
     """
-    global GRAPH, priorities, OP_PARENTS_NUM, LATENCY, NODE_OPS
+    global GRAPH, priorities, OP_PARENTS_NUM, LATENCY, NODE_OPS, predecessor_count
     # We need to do the necessary checks to make sure that we don't establish
     # an operation's latency until we've visited every one of its parents
 
@@ -289,6 +302,7 @@ def calc_priorities():
     q.append(ROOT)
     parents_num = list.copy(OP_PARENTS_NUM)
     priorities[ROOT] = 0
+    successor_count[ROOT] = 0
 
     while q:
         parent = q.popleft()
@@ -303,13 +317,15 @@ def calc_priorities():
             if parents_num[n] < 0:
                 print("Error: this value shouldn't be negative")
             new_weight = priorities[parent] + LATENCY[ir.opcode]
+            predecessor_count[k] += predecessor_count[parent]
 
             if priorities[n] < new_weight:
                 priorities[n] = new_weight
 
 
 def cons_graph():
-    global IrHead, GRAPH, priorities, NODE_OPS, def_line, ROOT
+    global IrHead, GRAPH, priorities, NODE_OPS, def_line, ROOT, REV_GRAPH, \
+        OP_CHILDREN_NUM, OP_PARENTS_NUM_NUM
     curr = IrHead
 
     while curr:
@@ -320,14 +336,19 @@ def cons_graph():
             curr = curr.next
             continue
         for i in get_defined(curr.opcode):
+
+            # max number of defined variables is 1 for all our purposes
             for j in get_used(curr.opcode):
+                other_ir_obj = NODE_OPS[j + 1]
+                REV_GRAPH[def_line[curr_data[j + 1]]].append(curr.line_num)
                 GRAPH[curr.line_num].append(def_line[curr_data[j + 1]])
                 # Add a directed edge between these two
 
-                OP_PARENTS_NUM[def_line[curr_data[j + 1]]] += 1
+                OP_PARENTS_NUM[other_ir_obj.line_num] += 1
                 # increment its parents count
 
-        NODE_OPS[curr.line_num] = curr
+                OP_CHILDREN_NUM[curr.line_num] += 1
+                # increment its children count
 
         if curr.opcode in [0,1,8]:
             # these are the opcodes of the memory-related operations
@@ -377,27 +398,131 @@ def check_memop_dependences():
                 GRAPH[curr.line_num].append(other.line_num)
         curr = curr.next
 
-# def assign_priorities():
+class MaxHeapObj(object):
+    """
+    Object used for ordering the members of the ready set
+    """
+    def __init__(self,val): self.val = val
+    def __lt__(self,other):
+      if self.val[0] == other.val[0]:
+        return self.val[1] > other.val[1]
+      return self.val[0] > other.val[0]
+    def __eq__(self,other):
+      return self.val == other.val
+    def __str__(self): return str(self.val)
 
-# def get_leaves():
-#     """
-#     find all the leaves of the graph
-#     :return: a list of leaves
-#     """
-#     global GRAPH
-# todo: DO WE NEED THIS??
+def get_leaves():
+    """
+    find all the leaves of the graph
+    :return: a set of leaves
+    """
+    global OP_CHILDREN_NUM
+    leaves = set()
+    for i in len(OP_CHILDREN_NUM):
+        if OP_CHILDREN_NUM[i] == 0:
+            leaves.add(i)
+    return leaves
 
-def remove_from_ready(ready_set):
+
+def remove_from_ready(ready_list, func_unit):
     """"""
+    NUMBER_RETRIES = 3
+    LENGTH_TUP = 3
+    # TODO: alter these if you want to change how we search ^^
+
+    unable = []
+    top = heappop(ready_list)
+
+    while NODE_OPS[top.val[2]].opcode in get_non_func_unit_ops(func_unit):
+        unable.append(top)
+        top = heappop(ready_list)
+
+    if NODE_OPS[top.val[2]].opcode not in get_unique_func_unit_ops(func_unit):
+        # the below code is only for if we want to prioritize the more constrained
+        # operations (i.e load, stores, mult's)
+        for dum_i in range(NUMBER_RETRIES):
+            obj = heappop(ready_list)
+            if NODE_OPS[top.val[2]].opcode in get_unique_func_unit_ops(func_unit):
+                unable.append(top)
+                top = obj
+                break
+
+            else:
+                unable.append(obj)
+    # todo: I'm not sure about this if statement part
+
+    # we do this last!!
+    for obj in unable:
+        heappush(ready_list, obj)
+
+    return top.val[LENGTH_TUP - 1]
+
+# operations = [0 "LOAD", 1 "STORE",2 "LOADI",3 "ADD",4 "SUB", 5"MULT",
+#               6 "LSHIFT", 7 "RSHIFT", 8 "OUTPUT", 9 "NOP",
+#               10 "CONSTANT", 11 "REGISTER", 12 "COMMA", 13"INTO", 14"ENDFILE"]
+
+
+################ CONSTANTS ABOVE ARE FROM FIRST 2 LABS  #####################
+
+# Flags:
+# -v -- used to generate Graphviz-compatible file
+# -h -- help
+#
+#
+# QUESTIONS:
+# we can have multiple dependence graphs in one block, correct?
+# do we use the same input ILOC from lab1 or 2?
+#
+#
+#
+# TESTING:
+# use lab3 simulator to:
+# -test if you have right number of nops
+# -
+#
+#
+# Todo:
+# Remove any NOP's
+
+def get_unique_func_unit_ops(func_unit):
+    """"""
+    if func_unit == 0:
+        return [0,1]
+    elif func_unit == 1:
+        return [5]
+    else:
+        print("Error: passed in bad functional unit")
+        return []
+
+def get_non_func_unit_ops(func_unit):
+    """"""
+    if func_unit == 0:
+        return [5]
+        # return [0,1,2,3,4,6,7,8,9]
+    elif func_unit == 1:
+        return [0,1]
+        # return [2, 3, 4, 6, 7, 8, 9]
+    else:
+        print("Error: passed in bad functional unit")
+        return []
 
 
 def list_schedule():
-    global LATENCY, MAX_VR
-    cycle = 1
-    ready = deque()
-    active = set()
-    starts = [None] * (MAX_VR + 1)
+    global LATENCY, tot_block_len, GRAPH, REV_GRAPH, OP_CHILDREN_NUM, func_unit,\
+        priorities, predecessor_count
 
+    cycle = 1
+    ready = list(get_leaves())
+    active = set()
+    starts = [None] * (tot_block_len + 1)
+
+    schedule_list = [] # shows order of operations from first to last
+
+    # TODO: how do we calculate delay of an operation?
+        # is it just latency of an operation? or do we have to calculate differently?
+        #   (see 12.3 in book)
+
+    remaining_children = list.copy(OP_CHILDREN_NUM)
     # Two functional units: f0 and f1
     # only f0 can execute load and store
     # only f1 can execute mul
@@ -406,17 +531,30 @@ def list_schedule():
     while ready and active:
         for i in active:
             # get the opcode here
-
             if starts[i] + LATENCY[opcode] < cycle:
                 active.remove(i)
-                # check if each of the successors are ready
-                for :
-                    if:
 
-        if len(ready) <= 0:
-            op = remove_next_op(ready)
-            starts[op] = cycle
-            active.add(op)
+                # check if each of the parents are ready
+                for n in REV_GRAPH[i]:
+                    remaining_children[n] -= 1
+                    # a successor is ready if each of its children have been added
+                    # and removed from the ready set
+                    if remaining_children[n] == 0:
+                        heappush(ready, MaxHeapObj((priorities[n],
+                                        predecessor_count[n],n)))
+
+                    elif remaining_children[n] <= 0:
+                        print("error: in decrementing number of processed children")
+            elif starts[i] + LATENCY[opcode] == None:
+                print("error in calculating end cycle of operation")
+
+        if len(ready) > 0:
+            for i in func_unit:
+                # remove an op for each functional unit
+                op = remove_from_ready(ready, i)
+                schedule_list.append(op)
+                starts[op] = cycle
+                active.add(op)
 
         cycle += 1
 
@@ -589,15 +727,13 @@ def print_ir():
         next_ir = next_ir.next
         # print(total_output)
 
-
-
 def rename():
     """
         Renames source registers into Live Ranges. 
         Will print out the output. 
     :return: 
     """
-    global IrHead, IrTail, MAXLIVE, MAX_VR, k, def_line, tot_block_len
+    global IrHead, IrTail, MAXLIVE, MAX_VR, k, NODE_OPS, tot_block_len
     SrToVr = []
     LU = []
 
@@ -654,7 +790,8 @@ def rename():
 
 
         setattr(curr, "line_num", index)
-        def_line.append(index)
+        NODE_OPS.appendleft(curr) # construct mapping of line number to ir object
+
         # we execute these two lines above for the sake
         # of our scheduler's dependence graph construction
 
