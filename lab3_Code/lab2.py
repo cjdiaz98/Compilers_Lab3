@@ -2,9 +2,7 @@ import sys
 import math
 from sys import stdin, stdout
 from datetime import datetime
-from collections import deque, defaultdict
-# import pygraphviz as pgv
-from heapq import *
+from collections import deque
 
 # BUF_SIZE = 1024 # used for reading a fixed buffer size
 BUF_SIZE = 4096  # used for reading a fixed buffer size
@@ -19,14 +17,12 @@ buf2_len = 0  # length of buf2
 char = ""  # current character that we're on
 line_num = 0  # keeps track of line number
 curr_string = ""  # holds the current lexeme as we're scanning the input
-flag_level = 1
+flag_level = -1
 EOF = False
 IrHead = None
 IrTail = None
 verbose = False
-checking = False
-# flags whether we want to check our data structures during the run
-
+checking = False # flags whether we want to check our data structures during the run
 lex_errors = 0
 syntax_errors = 0
 f = None
@@ -48,689 +44,15 @@ Remat_Map = {}
 
 StoreStack = deque()  # contains line numbers of all store operations
 
-MemOp_Head = None
+LoadI_Head = None
 
 operations = ["load", "store", "loadI", "add", "sub", "mult",
               "lshift", "rshift", "output", "nop", "constant", "register",
               "comma", "into", "endfile"]
-# operations = [0 "LOAD", 1 "STORE",2 "LOADI",3 "ADD",4 "SUB", 5"MULT",
-#               6 "LSHIFT", 7 "RSHIFT", 8 "OUTPUT", 9 "NOP",
-#               10 "CONSTANT", 11 "REGISTER", 12 "COMMA", 13"INTO", 14"ENDFILE"]
 
 
-################ CONSTANTS ABOVE ARE FROM FIRST 2 LABS  #####################
-
-# Flags:
-# -v -- used to generate Graphviz-compatible file
-# -h -- help
-#
-#
-# QUESTIONS:
-# we can have multiple dependence graphs in one block, correct?
-# do we use the same input ILOC from lab1 or 2?
-#
-#
-#
-# TESTING:
-# use lab3 simulator to:
-# -test if you have right number of nops
-# -
-#
-#
-# Todo:
-# Remove any NOP's
-
-# these are indexed by virtual register
-def_line = []
-def_line2 = []
-
-# keeps track of the line that each virtual register was defined on
-
-# GRAPH = pgv.AGraph(strict = True, directed=True)
-# these are have keys as line numbers
-GRAPH = defaultdict(list)
-REV_GRAPH = defaultdict(list)
-
-
-LATENCY = [3, 3, 1, 1,1,1,1,1,1,1]
-
-
-# this is the array containing all the IR's for each operation
-# theoretically each IR should contain as line_num the index that holds it in this array
-NODE_OPS = []
-priorities = [] # priorities of each of the nodes
-predecessor_count = [] # keeps track of how many predecessors each node has
-successor_count = [] # keeps track of how many successors each node has
-# all the above arrays are indexed on line number, with 0 being blank
-
-
-ROOT = None
-
-OP_PARENTS_NUM = []
-# array containing the number of parents for each operation
-
-OP_CHILDREN_NUM = []
-# array containing the number of children for each operation
-
-vr_val_map = {}
-
-func_unit = [0,1]
-
-final_schedule = None
-######## CONSTANTS ABOVE ARE FROM LAB 3 #########
-###########  BELOW CODE BELONGS TO LAB 3    #####################
-
-def check_node_ops():
-    global NODE_OPS
-    for i in range(1,len(NODE_OPS)):
-        if NODE_OPS[i] != None and NODE_OPS[i].line_num != i:
-            print("Operation %d  doesn't match its contained IR, which says %d"
-                  % (i, NODE_OPS[i].line_num))
-
-def check_node_ops2():
-    global NODE_OPS, def_line
-    for vr in range(len(def_line)):
-        line = def_line[vr]
-        ir_op = NODE_OPS[line]
-        defined = get_defined(ir_op.opcode)
-        if defined:
-            defined_vr = ir_op.ir_data[defined[0] + 1]
-            if defined_vr != vr:
-                print(
-                "Operation's vr %d doesn't match vr %d matched to line %d"
-                % (defined_vr, vr, line))
-
-###########  ABOVE IS CODE WE USE TO CHECK OUR DATA STRUCTURES    #####################
-
-def cons_unweighted_dot_file():
-    global GRAPH
-    # https: // stackoverflow.com / questions / 23734030 / how - can - python - write - a - dot-file-for -graphviz - asking -for -some-edges-to-be-colored
-    with open('graph.dot', 'w') as out:
-        for line in ('digraph G {', 'size="16,16";', 'splines=true;'):
-            out.write('{}\n'.format(line))
-        for parent in GRAPH:
-            # print("About to create edges for:")
-            # print(parent)
-            for child in GRAPH[parent]:
-                out.write(
-                    '{} -> {};\n'.format(parent, child))
-        out.write('}\n')
-
-def track_operation(ir_op):
-    """
-    Will track all of the values in virtual registers. 
-    Will NOT track the values in primary memory. 
-    
-    :param ir_op: ir object
-    :return: 
-    """
-    global vr_val_map
-    operation_map = {}
-    operation_map[3] = (lambda x,y: x + y)
-    operation_map[4] = (lambda x,y: x - y)
-    operation_map[5] = (lambda x,y: x * y)
-    operation_map[6] = (lambda x,y: x << y)
-    operation_map[7] = (lambda x,y: x >> y)
-
-    ir_data = ir_op.ir_data
-    defined = get_defined(ir_op.opcode)
-    # if verbose and defined:
-    #     print("vr at line %d is: %d" % (ir_op.line_num, ir_data[defined[0] + 1]))
-
-    if ir_op.opcode in [8,9,1,0]:
-        # defines some vr
-        for i in get_defined(ir_op.opcode):
-            vr_val_map[ir_data[i + 1]] = None
-    elif ir_op.opcode == 2:
-        vr_val_map[ir_data[get_defined(ir_op.opcode)[0] + 1]] = ir_data[0]
-    else:
-        for i in get_defined(ir_op.opcode):
-            uses = get_used(ir_op.opcode)
-            not_def = False
-            for j in uses:
-                if vr_val_map[ir_data[j + 1]] == None:
-                    vr_val_map[ir_data[i + 1]] = None
-                    not_def = True
-            if not not_def:
-                vr1 = ir_data[uses[0] + 1]
-                vr2 = ir_data[uses[1] + 1]
-                # if verbose:
-                #     print_operation(ir_op,1)
-                #     print(ir_data)
-                #     print("two VR's: %d and %d" % (vr1, vr2))
-                # all these operations are binary
-                vr_val_map[ir_data[i + 1]] = operation_map[ir_op.opcode]\
-                    (vr_val_map[vr1],vr_val_map[vr2])
-
-
-def main():
-    """
-    Will appropriately read in the file arguments and run the operation that we 
-    want. This might be to run on a single file, or a directory of files. 
-    We can do any one of the following operations: 
-    -print help options
-    -print out all tokens and lexical errors
-    -scan and parse
-    -scan, parse, and print out the intermediate representation
-    :return: 
-    """
-    global verbose, flag_level, f, char, EOF, k, MAXLIVE, IrHead, checking
-    numArgs = len(sys.argv)
-
-    if "-v" in sys.argv:
-        verbose = True
-    if "-g" in sys.argv:
-        flag_level = 2
-    if "-h" in sys.argv:
-        flag_level = 0
-
-    if numArgs < 2 or numArgs > 4 or flag_level == 0:
-        print("Note: invoke schedule as follows:"
-              "schedule -g(optional) <filename> or \n schedule <filename>")
-        print("Valid flags are -h for help, -g to generate a graphviz dot file")
-        # print out help statement
-        return
-
-
-    f = open(sys.argv[-1], 'r')
-
-    init_double_buf()
-    parse()
-    rename()  # do the renaming regardless
-
-    # do lab3 specific part below
-    global vr_val_map, NODE_OPS
-
-
-
-    lab3()
-
-def lab3():
-    global NODE_OPS, tot_block_len, OP_PARENTS_NUM, \
-        priorities, predecessor_count, OP_CHILDREN_NUM, successor_count
-    assign_line_mappings()
-    OP_PARENTS_NUM = [0] * (tot_block_len + 2)
-    OP_CHILDREN_NUM = [0] * (tot_block_len + 2)
-    NODE_OPS.extend([None] * 2)
-    predecessor_count = [0] * (tot_block_len + 2)
-    successor_count = [0] * (tot_block_len + 2)
-    priorities = [0] * (tot_block_len + 2)
-    # make 1 extra slot just in case we have to make a new root
-    if verbose:
-        print("checking node ops")
-        check_node_ops()
-        check_node_ops2()
-    if flag_level == 1:
-        schedule()
-    else:
-        cons_graph_viz()
-
-def cons_graph_viz():
-    global GRAPH
-    cons_graph()
-    # write to file
-    cons_unweighted_dot_file()
-    # pgv_graph = pgv.AGraph(GRAPH) # todo
-    # pgv.draw("dotOutput.txt", 'dot')
-
-
-def insert_memop_list(list_node):
-    """"""
-    global MemOp_Head, MemOp_Tail
-    if not MemOp_Head:
-        MemOp_Head = list_node
-        MemOp_Tail = list_node
-        list_node.next = None
-        list_node.prev = None
-    else:
-        MemOp_Tail.link_next(list_node)
-        MemOp_Tail = list_node
-        MemOp_Tail.next = None
-
-def find_roots():
-    """
-    Finds the roots of the graph
-    :return: list of roots in the graph
-    """
-    global GRAPH
-    changed = True
-    nodes = set(GRAPH.keys())
-
-    while changed:
-        # if verbose:
-            # print("new set nodes")
-            # print(nodes)
-        changed = False
-        original_size = len(nodes)
-
-        for n in nodes:
-            neighbors = GRAPH[n]
-            nodes = nodes.difference(neighbors)
-            new_size = len(nodes)
-            if new_size != original_size:
-                changed = True
-                break
-    print("roots found")
-    print(nodes)
-    return nodes # this now contains the set of roots
-
-
-def transform_one_root():
-    """
-    Will transform the graph so that there's only one root. 
-    Will also return the root of the graph.
-    :return: 
-    """
-    global tot_block_len, GRAPH, NODE_OPS, tot_block_len
-    roots = find_roots()
-    if len(roots) == 1:
-        return roots.pop()
-    if len(roots) < 1:
-        print("ERROR: graph doesn't have any roots")
-        return None
-
-    root_op = IRArray(9, None, None, None)
-    setattr(root_op, "line_num", tot_block_len + 1)
-    NODE_OPS[tot_block_len + 1] = root_op
-
-    new_root = tot_block_len + 1
-    # TODO: map the new root to its operation (a NOP) in here
-    for root in roots:
-        GRAPH[new_root].append(root)
-
-    return new_root
-
-# add an edge to each of the roots, so that we only have one root
-
-
-def calc_priorities():
-    """
-    Calculates the priorities of each node. 
-    Runs a latency weighted BFS. 
-    Also will count the number of successors that each node has. 
-    :return: 
-    """
-    global GRAPH, priorities, OP_PARENTS_NUM, LATENCY, NODE_OPS, \
-        predecessor_count, tot_block_len, successor_count
-    # We need to do the necessary checks to make sure that we don't establish
-    # an operation's latency until we've visited every one of its parents
-
-    q = deque()
-    q.append(ROOT)
-    parents_num = list.copy(OP_PARENTS_NUM)
-    priorities[ROOT] = 0
-    if verbose:
-        print("block len: %d and ROOT: %d" % (tot_block_len, ROOT))
-    successor_count[ROOT] = 0
-
-    while q:
-        parent = q.popleft()
-        neighbors = GRAPH[parent]
-        ir = NODE_OPS[parent]
-
-        for k in neighbors:
-            n = int(k)
-            parents_num[n] -= 1
-            if parents_num[n] == 0:
-                q.append(n)
-            if parents_num[n] < 0:
-                print("Error: this value shouldn't be negative")
-            new_weight = priorities[parent] + LATENCY[ir.opcode]
-            predecessor_count[k] += predecessor_count[parent]
-
-            if priorities[n] < new_weight:
-                priorities[n] = new_weight
-
-
-def cons_graph():
-    global IrHead, ROOT
-    curr = IrHead
-
-    while curr:
-        track_operation(curr)
-        # we do this to keep track of our VR values
-
-        if curr.opcode == 9:
-            curr = curr.next
-            continue
-
-        add_edge_to_dependences(curr)
-
-        if curr.opcode in [0,1,8]:
-            # these are the opcodes of the memory-related operations
-            # we need to store them in a separate LL for later processing
-            temp_curr = curr
-            curr = curr.next
-            insert_memop_list(temp_curr)
-        else:
-            curr = curr.next
-    check_memop_dependences()
-    ROOT = transform_one_root()
-
-
-def add_edge_to_dependences(curr):
-    """
-    Adds an edge from the given operation to all of its dependences
-    :param curr: 
-    :return: 
-    """
-    global GRAPH, priorities, NODE_OPS, def_line, ROOT, REV_GRAPH, \
-        OP_CHILDREN_NUM, OP_PARENTS_NUM
-    curr_data = curr.ir_data
-
-    used = get_used(curr.opcode)
-
-    if len(used) == 0:
-        GRAPH[curr.line_num] = []
-
-    # max number of defined variables is 1 for all our purposes
-    for j in used:
-        other_line = def_line[curr_data[j + 1]]
-        other_ir_obj = NODE_OPS[other_line]
-        # if verbose:
-        #     print("curr line num: %d" % curr.line_num)
-        #     print("other line num: %d" % other_ir_obj.line_num)
-        if verbose and curr.opcode == 0:
-            print(
-            "edge added: (%d,%d)" % (curr.line_num, other_ir_obj.line_num))
-        REV_GRAPH[other_ir_obj.line_num].append(curr.line_num)
-        GRAPH[curr.line_num].append(other_ir_obj.line_num)
-        # Add a directed edge between these two
-
-        OP_PARENTS_NUM[other_ir_obj.line_num] += 1
-        # increment its parents count
-
-        OP_CHILDREN_NUM[curr.line_num] += 1
-        # increment its children count
-
-def get_address(ir_op):
-    """
-    Gets the address corresponding to this operations
-    :param ir_op: 
-    :return: 
-    """
-    global vr_val_map
-    if ir_op.opcode == 0:
-        return vr_val_map[ir_op.ir_data[1]]
-    elif ir_op.opcode == 1:
-        return vr_val_map[ir_op.ir_data[9]]
-    elif ir_op.opcode == 8:
-        return ir_op.ir_data[0]
-    else:
-        return -1
-
-def get_op_index(ir_op):
-    if ir_op.opcode == 0:
-        return 0
-    elif ir_op.opcode == 1:
-        return 1
-    elif ir_op.opcode == 8:
-        return 2
-    else:
-        return None
-
-
-def check_memop_dependences():
-    global MemOp_Head, vr_val_map
-    curr = MemOp_Head
-
-    # Key: load = 0, store = 1, output = 2. Same = 0, Distinct = 1, Unknown = 2
-    conflict_table = []
-    conflict_table.append([[False, False, False],[True, False, True],[False, False, False]])
-    conflict_table.append([[True, False, True],[True, False, True],[True, False, True]])
-    conflict_table.append([[False, False, False],[True, False, True],[True, True, True]])
-    # should correspond to the 3x3x3 table in lecture
-
-    # [False, False, False] # LL, LO, OL
-    # [True, False, True] # SL AND SO, SS, LS and OS
-    # [True, True, True] # OO
-
-    #  this table is here to help us check if there are conflicts or not.
-    # if we want to match the slides, then we need a 3D table
-
-    while curr:
-        other = curr.prev
-        curr_mem_addr = get_address(curr)
-
-        if curr_mem_addr == None:
-            print("mem addr error")
-
-        if verbose:
-            print_operation(curr, 1)
-
-        while other:
-            known = 1 # by default say they're distinct
-            # check for a conflict
-
-            other_mem_addr = get_address(other)
-            if other_mem_addr == None:
-                print("mem addr error")
-
-            if not other_mem_addr:
-                known = 2
-            elif other_mem_addr == other_mem_addr:
-                known = 0
-            if conflict_table[get_op_index(curr)][get_op_index(other)][known]:
-                print("memory dependence between ops %d and %d " % (curr.line_num, other.line_num))
-                GRAPH[curr.line_num].append(other.line_num)
-            other = other.prev
-
-        curr = curr.next
-
-class MaxHeapObj(object):
-    """
-    Object used for ordering the members of the ready set
-    """
-    def __init__(self,val): self.val = val
-    def __lt__(self,other):
-      if self.val[0] == other.val[0]:
-        return self.val[1] > other.val[1]
-      return self.val[0] > other.val[0]
-    def __eq__(self,other):
-      return self.val == other.val
-    def __str__(self): return str(self.val)
-
-def get_leaves():
-    """
-    find all the leaves of the graph
-    :return: a set of leaves
-    """
-    global OP_CHILDREN_NUM
-    leaves = set()
-    for i in range(len(OP_CHILDREN_NUM)):
-        if i!= 0 and OP_CHILDREN_NUM[i] == 0:
-            leaves.add(i)
-    return leaves
-
-
-def remove_from_ready(ready_list, func_unit):
-    """"""
-    NUMBER_RETRIES = 3
-    LENGTH_TUP = 3
-    # TODO: alter these if you want to change how we search ^^
-    print("ready_list length: %d" % len(ready_list))
-    print("smallest element:")
-    print(ready_list)
-    unable = []
-    top = heappop(ready_list)
-
-    print(" top value line is: %s" % top.val[-1])
-    while ready_list and NODE_OPS[top.val[-1]].opcode in get_non_func_unit_ops(func_unit):
-        unable.append(top)
-        top = heappop(ready_list)
-
-    # if NODE_OPS[top.val[-1]].opcode not in get_unique_func_unit_ops(func_unit):
-    #     # the below code is only for if we want to prioritize the more constrained
-    #     # operations (i.e load, stores, mult's)
-    #     for dum_i in range(NUMBER_RETRIES):
-    #         obj = heappop(ready_list)
-    #         if NODE_OPS[top.val[2]].opcode in get_unique_func_unit_ops(func_unit):
-    #             unable.append(top)
-    #             top = obj
-    #             break
-    #
-    #         else:
-    #             unable.append(obj)
-    # todo: I'm not sure about this if statement part
-
-    # we do this last!!
-    for obj in unable:
-        heappush(ready_list, obj)
-
-    if NODE_OPS[top.val[-1]] in get_non_func_unit_ops(func_unit):
-        heappush(ready_list, top)
-        return None
-    else:
-        return top.val[-1]
-
-# operations = [0 "LOAD", 1 "STORE",2 "LOADI",3 "ADD",4 "SUB", 5"MULT",
-#               6 "LSHIFT", 7 "RSHIFT", 8 "OUTPUT", 9 "NOP",
-#               10 "CONSTANT", 11 "REGISTER", 12 "COMMA", 13"INTO", 14"ENDFILE"]
-
-
-################ CONSTANTS ABOVE ARE FROM FIRST 2 LABS  #####################
-
-# Flags:
-# -v -- used to generate Graphviz-compatible file
-# -h -- help
-#
-#
-# QUESTIONS:
-# we can have multiple dependence graphs in one block, correct?
-# do we use the same input ILOC from lab1 or 2?
-#
-#
-#
-# TESTING:
-# use lab3 simulator to:
-# -test if you have right number of nops
-# -
-#
-#
-# Todo:
-# Remove any NOP's
-
-def get_unique_func_unit_ops(func_unit):
-    """"""
-    if func_unit == 0:
-        return [0,1]
-    elif func_unit == 1:
-        return [5]
-    else:
-        print("Error: passed in bad functional unit")
-        return []
-
-def get_non_func_unit_ops(func_unit):
-    """"""
-    if func_unit == 0:
-        return [5]
-        # return [0,1,2,3,4,6,7,8,9]
-    elif func_unit == 1:
-        return [0,1]
-        # return [2, 3, 4, 6, 7, 8, 9]
-    else:
-        print("Error: passed in bad functional unit")
-        return []
-
-
-def list_schedule():
-    global LATENCY, tot_block_len, GRAPH, REV_GRAPH, OP_CHILDREN_NUM, func_unit,\
-        priorities, predecessor_count
-
-    cycle = 1
-    ready = list()
-    heapify(ready)
-    leaves = get_leaves()
-    for n in leaves:
-        heap_obj = MaxHeapObj((priorities[n],
-                                    predecessor_count[n], n))
-        print(heap_obj)
-        heappush(ready, heap_obj)
-
-    if verbose:
-        print("set of leaves")
-        print(ready)
-    active = set()
-    starts = [None] * (tot_block_len + 2)
-
-    schedule_list = [] # shows order of operations from first to last
-
-    # TODO: how do we calculate delay of an operation?
-        # is it just latency of an operation? or do we have to calculate differently?
-        #   (see 12.3 in book)
-
-    remaining_children = list.copy(OP_CHILDREN_NUM)
-    # Two functional units: f0 and f1
-    # only f0 can execute load and store
-    # only f1 can execute mul
-    # only one output operation per cycle
-    if verbose:
-        print("About to start list scheduling")
-    while ready or active:
-        subtract_from_active = set()
-        for i in active:
-            # get the opcode here
-            active_op = NODE_OPS[i]
-            opcode = active_op.opcode
-            if starts[i] + LATENCY[opcode] < cycle:
-                subtract_from_active.add(i)
-                # check if each of the parents are ready
-                for n in REV_GRAPH[i]:
-                    remaining_children[n] -= 1
-                    # a successor is ready if each of its children have been added
-                    # and removed from the ready set
-                    if remaining_children[n] == 0:
-                        next_obj = MaxHeapObj((priorities[n],
-                                        predecessor_count[n],n))
-                        print(next_obj)
-                        heappush(ready, next_obj)
-
-                    elif remaining_children[n] <= 0:
-                        print("error: in decrementing number of processed children")
-            elif starts[i] + LATENCY[opcode] == None:
-                print("error in calculating end cycle of operation")
-        active = active.difference(subtract_from_active)
-
-        if len(ready) > 0:
-            for i in func_unit:
-                # remove an op for each functional unit
-                op = remove_from_ready(ready, i)
-                if not op:
-                    schedule_list.append(None)
-
-                if verbose:
-                    print("adding op: %d to schedule" % op)
-                schedule_list.append(op)
-                print(op)
-                starts[op] = cycle
-                active.add(op)
-
-        cycle += 1
-    return schedule_list
-
-
-def schedule():
-    global final_schedule, GRAPH, def_line, def_line2
-    cons_graph()
-    if verbose:
-        print("Vr val map")
-        print(vr_val_map)
-        print("Graph")
-        print(GRAPH)
-        print("def line lst")
-        print(len(def_line))
-        print(def_line)
-        print("def line2 list")
-        print(len(def_line2))
-        print(def_line2)
-    calc_priorities()
-    final_schedule = list_schedule()
-    print("Final schedule")
-    print(final_schedule)
-
-#########################################################
-######    ALL CODE BELOW HERE IS FOR THE RENAMING PORTION ###########
-#########################################################
+# keeps track of which virtual registers have been spilled
+# note: we'll only ever add bits to this number
 
 class IRArray:
     def __init__(self, opcode, int1, int2, int3):
@@ -750,7 +72,6 @@ class IRArray:
         """
         self.opcode = opcode
         self.ir_data = []
-        self.line_num = -1  # used for scheduling
         for i in range(12):
             self.ir_data.append(None)
         self.ir_data[0] = int1
@@ -874,6 +195,7 @@ class IRArray:
         self.next.prev = self.prev
         self.prev.next = self.next
 
+
 def print_ir():
     """
     Prints out the intermediate representation in an 
@@ -890,29 +212,118 @@ def print_ir():
         next_ir = next_ir.next
         # print(total_output)
 
-def assign_line_mappings():
-    global IrHead, def_line, def_line2, NODE_OPS, MAX_VR
-    line = 1
-    curr = IrHead
-    def_line = [None] * (MAX_VR + 1)
-    NODE_OPS.append(None)
-    # we put none in the first index to
-    # account for our lines starting at 1
-    while curr:
-        setattr(curr, "line_num", line)
-        NODE_OPS.append(curr)
-        curr_data = curr.ir_data
-        defined = get_defined(curr.opcode)
-        if defined:
-            vr = curr_data[defined[0] + 1]
-            def_line[vr] = line
-            if verbose:
-                def_line2.append((vr,line))
 
-        curr = curr.next
-        line += 1
+iloc_comment_header = "//NAME: Jacob Diaz \n //NETID: " \
+                      "cjd8"
+
+
+def main():
+    """
+    Will appropriately read in the file arguments and run the operation that we 
+    want. This might be to run on a single file, or a directory of files. 
+    We can do any one of the following operations: 
+    -print help options
+    -print out all tokens and lexical errors
+    -scan and parse
+    -scan, parse, and print out the intermediate representation
+    :return: 
+    """
+    global verbose, flag_level, f, char, EOF, k, MAXLIVE, IrHead, checking
+    numArgs = len(sys.argv)
+    numFlags = 0  # counts how many of provided args are flags
+
+    if len(sys.argv) > 4:
+        print("Note: 412alloc takes 3 arguments:"
+              "412alloc <flag> <filename>")
+        return
+
+    if is_number(sys.argv[1]):
+        k = int(sys.argv[1])
+        flag_level = 3
+        if k < 3:
+            print("k must be at least 3")
+            return
+
+    if "-l" in sys.argv:
+        flag_level = 3
+        numFlags += 1
+        # added flag --> will print out the max live range.
+    if "-x" in sys.argv:
+        flag_level = 1
+        numFlags += 1
+    if "-h" in sys.argv:
+        flag_level = 0
+        numFlags += 1
+    if "-v" in sys.argv:
+        print("verbose turned on")
+        verbose = True
+        numArgs -= 1
+    if "-c" in sys.argv:
+        checking = True
+        numArgs -= 1
+
+    if numArgs < 3:
+        print("Note: 412alloc takes 3 arguments:"
+              "412alloc <flag> <filename>")
+
+    if numFlags > 1:
+        print("Note: 412alloc takes only 1 flag:"
+              "412alloc <flag> <filename>. You specified %d " % numFlags)
+
+    if flag_level == 0:
+        print("412alloc takes the arguments <k|-x> <filename>")
+        return
+        # print out help statement
+
+    f = open(sys.argv[-1], 'r')
+
+    init_double_buf()
+    parse()
+
+    rename()  # do the renaming regardless
+
+    print(iloc_comment_header)
+    if flag_level == 1:
+        if verbose:
+            print("About to print renamed")
+        print_renamed_ir()
+
+        if verbose:
+            # check that we didn't prematurely use any undefined registers
+            check_not_using_undefined()
+        # then we print the renamed intermediate representation
+        return
+    elif flag_level == 2:
+        print("MAXLIVE: %d" % MAXLIVE)
+        # then we print the maxlive
+        return
+    else:
+        # then we allocate the registers
+        print("//SIM INPUT:")
+        print("//OUTPUT:")
+        # print("//SIM INPUT: -r %d" % k)
+        # reg_alloc()
+
+        reg_alloc(IrHead, True)
+        if checking:
+            check_no_repeat_vr(IrHead)
+        alloc_remaining_loadI()
+        # construct the IR
+
+
+def alloc_remaining_loadI():
+    """
+    Will print out all the loadI's which we didn't print out before because
+    they were never used. 
+
+    Note: these will get printed out after the bulk of the ILOC operations. 
+    :return: 
+    """
+    global LoadI_Head
     if verbose:
-        def_line2.sort()
+        print("About to output remaining loadI operations")
+    print("// Adding in all extraneous loadI operations below")
+    reg_alloc(LoadI_Head, False)
 
 def rename():
     """
@@ -920,13 +331,12 @@ def rename():
         Will print out the output. 
     :return: 
     """
-    global IrHead, IrTail, MAXLIVE, MAX_VR, k, NODE_OPS, tot_block_len, def_line, def_line2
-    print("Total block len: %d" % tot_block_len)
+    global IrHead, IrTail, MAXLIVE, MAX_VR, k
     SrToVr = []
     LU = []
 
-    # if verbose:
-    #     print("max source: %d" % MAX_SOURCE)
+    if verbose:
+        print("max source: %d" % MAX_SOURCE)
     for i in range(MAX_SOURCE + 1):
         SrToVr.append(-1)  # indicates invalid
         LU.append(-1)
@@ -939,12 +349,13 @@ def rename():
 
     index = tot_block_len
     while curr != None:
-        # iterate from back to front
         curr_arr = curr.ir_data
         # look through all the operands that we define first
 
         defined = get_defined(curr.opcode)
         for j in defined:
+            # if verbose:
+            #     print("current register: %d" % curr_arr[j])
             if SrToVr[curr_arr[j]] == -1:
                 curr_max -= 1
                 # if we hit the definition of the SR, then we decrement curr_max
@@ -953,11 +364,6 @@ def rename():
 
             # set NU and VR of the operand
             curr_arr[j + 1] = SrToVr[curr_arr[j]]  # virtual register
-
-            # def_line.append(index) # todo
-            # if verbose:
-            #     def_line2.append((SrToVr[curr_arr[j]], index))
-
             curr_arr[j + 3] = LU[curr_arr[j]]  # next use
             LU[curr_arr[j]] = -1  # NOTE: we represent infinity with -1.
             # LU[curr_arr[j]] = math.inf
@@ -981,35 +387,22 @@ def rename():
             curr_arr[j + 3] = LU[curr_arr[j]]  # next use
             LU[curr_arr[j]] = index
 
-
-        # setattr(curr, "line_num", index) # todo
-        # NODE_OPS.append(curr) # construct mapping of line number to ir object
-
-        # we execute these two lines above for the sake
-        # of our scheduler's dependence graph construction
-
         # after we've looked thru uses and def's, then we check if
         # MAXLIVE has changed
         if MAXLIVE < curr_max:
             MAXLIVE = curr_max
         index -= 1
         curr = curr.prev
-    # print("index: %d" % index)
 
     if MAXLIVE > k:
-        # if verbose:
-        #     print(
-        #         "need to reserve a spill register. Only have %d now" % (k - 1))
+        if verbose:
+            print(
+                "need to reserve a spill register. Only have %d now" % (k - 1))
         k -= 1
         # we have to reserve a pr for spilling
 
-    # NODE_OPS.reverse() # todo
-
     if vr_name != 0:
         MAX_VR = vr_name - 1
-    if verbose:
-        # print(NODE_OPS)
-        print("node ops len: %d " % len(NODE_OPS))
 
 
 def print_operation(ir_entry, offset):
@@ -1067,6 +460,31 @@ def constr_op_string(ir_entry, offset, vr):
         output += "=> %s%d" % (r_string, data[8 + offset])
     return output
 
+
+def get_arg_types(opcode):
+    """
+
+    :param opcode: opcode representing operation we want to print
+    :return: a three part list indicating the type of each respective argument. 
+    0 = constant
+    1 = register
+    None = empty
+    """
+    # operations = ["load", "store","loadI", "add", "sub", "mult",
+    #               "lshift", "rshift", "output", "nop"]
+    if opcode >= 0 and opcode <= 1:
+        return [1, None, 1]
+    if opcode == 2:
+        return [0, None, 1]
+    if opcode >= 3 and opcode <= 7:
+        return [1, 1, 1]
+    if opcode == 8:
+        return [0, None, None]
+    else:
+        # NOP or invalid
+        return [None, None, None]
+
+
 def print_renamed_ir():
     """
         Will print out the IR after it's been renamed. 
@@ -1082,6 +500,100 @@ def print_renamed_ir():
     while curr != None:
         print_operation(curr, 1)
         curr = curr.next
+
+
+def check_pr_vr():
+    """
+    Will print out all the virtual registers in violation of the 
+    PRToVR[VRToPR[vr]] = vr rule
+    :return: 
+    Returns true if the mapping wasn't violated, else false.
+    """
+    global VrToPr, PrToVr, MAX_VR
+    valid = True
+    for v in range(MAX_VR):
+        if VrToPr[v] != -1 and PrToVr[VrToPr[v]] != v:
+            valid = False
+            print("VR %d violated. Corresponding pr %d mapped to %d" %
+                  (v, VrToPr[v], PrToVr[VrToPr[v]]))
+            print("Meanwhile VR %d maps to %d" %
+                  (PrToVr[VrToPr[v]], VrToPr[PrToVr[VrToPr[v]]]))
+    return valid
+
+
+def check_not_using_undefined():
+    global IrHead, MAX_VR
+    defined = []
+    operations = ["load", "store", "loadI", "add", "sub", "mult",
+                  "lshift", "rshift", "output", "nop"]
+    for i in range(MAX_VR + 1):
+        defined.append(False)
+    # print("Max vr %d" % MAX_VR)
+    curr = IrHead
+    line = 1
+
+    while curr != None:
+        uses = get_used(curr.opcode)
+        for i in uses:
+            if not defined[curr.ir_data[i + 1]]:
+                print("Register r%d for %s at Line %d not defined before this" %
+                      (curr.ir_data[i + 1], operations[curr.opcode], line))
+
+        defined_ind = get_defined(curr.opcode)
+        for i in defined_ind:
+            # print("defined ind: %d" % curr.ir_data[i + 1])
+            defined[curr.ir_data[i + 1]] = True
+
+        curr = curr.next
+        line += 1
+
+
+def check_all_pr_mapped():
+    """
+    Checks that all the physical regsiters are mapped to a vr
+    :return: 
+    """
+    global PrToVr
+    for i in range(len(PrToVr)):
+        if PrToVr[i] == -1:
+            print("PR %d NOT MAPPED PROPERLY!!" % i)
+
+
+def check_prnu(line_num):
+    """
+    Doesn't return anything
+
+    Just checks that our PrNu mapping is consistent with the current line number. 
+    :param line_num: 
+    :return: 
+    """
+    global PrNu
+    for i in range(len(PrNu)):
+        if PrNu[i] == -1:
+            continue
+        if PrNu[i] < line_num:
+            print("PR %d not mapped correctly to next use. "
+                  "Next use is %d" % (i, PrNu[i]))
+
+
+# def check_rename(head):
+#     """
+#     Checks that each virtual register appears in only one definition, and that
+#     a VR only appears in a use after it's been defined.
+#     :return:
+#     """
+#     curr = head
+#     defined_map = {}
+#     while curr:
+#         curr_data = curr.ir_data
+#         defined = get_defined(curr.opcode)
+#         used = get_used(curr.opcode)
+#         if len(used) > 0:
+#             # check to see that these have already been defined
+#         if :
+#             # check if this has already been defined
+#
+#         curr = curr.next
 
 def check_whole_no_repeat_vr(head):
     """
@@ -1112,6 +624,209 @@ def check_no_repeat_vr(curr):
                 # then check if the PR are the same
                 print("ERROR: Physical register reused for two uses in an operation")
                 print_operation(curr, 2)
+
+
+# we will rematerialize a value if it isn't located in the the spill memory address
+# this is because it would be in the spill address if we had chosen to spill it
+# in the case that it is rematerializable, we'll forego the restore step and just
+# loadI it directly into the register
+# we can keep a map from virtual registers to rematerializable values
+
+def getAPR(vr, nu,other_pr):
+    """
+
+    :param vr: 
+    :param nu: 
+    :param other_pr:
+
+    :return: 
+    """
+    global VrToPr, PrToVr, PrNu, MAX_VR, pr_stack, line_num, checking
+    # We should always conserve the property VrToPr[VrToPr[vr]] = vr
+    # when VrToPr[vr] != invalid
+
+    if pr_stack:  # if stack isn't empty
+        x = pr_stack.pop()
+    else:
+        # note: x is a physical register
+        # if verbose:
+        #     print("queue is empty")
+        if checking:
+            check_all_pr_mapped()
+        x = find_spill_then_spill(other_pr)
+
+    # print("vr %d" % vr)
+    # print("max vr %d" % len(VrToPr))
+    VrToPr[vr] = x
+    PrToVr[x] = vr
+    PrNu[x] = nu
+    return x
+
+
+def find_spill_then_spill(other_pr):
+    """
+    Returns the physical register which we want to clear to store another VR
+
+    Note: we won't always spill a value; we can also return a clean VR. 
+    We will often prioritize returning a clean VR
+
+    Will only ever be called if we have no free PR's
+
+    :param other_pr: 
+    this is the other pr which we want to preserve when finding a spill. 
+    Note: this is -1 when we don't have another pr we want to preserve. 
+
+    :return: 
+    Number of physical register
+
+    Side effects:
+    Will also appropriately spill the PR that we get (if it turns out to be dirty)
+
+    Tries to compromise between clean and dirty values and their respective
+    distances. 
+    """
+    global PrNu, line_num
+    # note: we assume that every PR has a next use,
+    # else we wouldn't be here
+    curr_max = line_num
+    pr = -1
+    # find the farthest clean pr for spilled memory
+    clean_pr = get_clean_spill(other_pr)
+
+    # if remat_pr != -1:
+    # Todo: this is only if we always want to pick the remat VR
+    #     unmap_pr(remat_pr)
+    #     return remat_pr
+
+    # find the farthest general pr thru a linear scan
+    for i in range(len(PrNu)):
+        if PrNu[i] > curr_max and other_pr != i:
+            curr_max = PrNu[i]
+            pr = i
+
+    # if clean_pr != -1:
+    #     spill(clean_pr)  # we have to use a dirty value
+    #     return clean_pr
+    #
+    # spill(pr)  # we have to use a dirty value
+    # return pr # todo: maybe we want to just return the dirty one
+
+    if verbose:
+        print("found spill: %d" % pr)
+
+    if clean_pr == -1:
+        spill(pr)  # we have to use a dirty value
+        return pr
+
+    if PrNu[clean_pr] + 4 < PrNu[pr]:
+        # this heuristic was pretty arbitrarily chosen
+        spill(pr)
+        return pr
+
+    spill(clean_pr)
+    return clean_pr
+
+
+def get_spill_addr(vr):
+    """
+    Note: for the purposes of this lab, we assume that all memory addressed
+    32768 and beyond is reserved for spilling. 
+    :param vr: 
+        VR for which we need to find a spill address. 
+    :return: 
+        The VR's spill address. 
+    """
+    return 32768 + 4 * vr
+
+def get_remat_spill(other_pr):
+    """
+    Will return the PR corresponding to the farthest used rematerializable 
+    VR. 
+    :param other_pr: the pr that we want to preserve.
+    Or will return -1 if no such pr exists. 
+    :return: integer
+    """
+    global PrNu, line_num
+    curr_max = line_num
+    pr = -1
+    # find the farthest clean pr, for spilled
+
+    # find the farthest general pr thru a linear scan
+    for i in range(len(PrNu)):
+        if PrNu[i] > curr_max and check_rematerializable(i) \
+                and other_pr != i:
+            curr_max = PrNu[i]
+            pr = i
+    return pr
+
+def get_clean_spill(other_pr):
+    """
+    Will return the PR corresponding to the farthest used previously spilled 
+    VR. 
+    :param other_pr: the pr that we want to preserve.
+    Or will return -1 if no such pr exists. 
+    :return: integer
+    """
+    global PrNu, line_num
+    curr_max = line_num
+    pr = -1
+    # find the farthest clean pr, for spilled
+
+    # find the farthest general pr thru a linear scan
+
+    remat_pr = get_remat_spill(other_pr)
+    if remat_pr != -1:
+        return remat_pr
+
+    for i in range(len(PrNu)):
+        if PrNu[i] > curr_max and check_spill_addr(i) \
+                and other_pr != i:
+            curr_max = PrNu[i]
+            pr = i
+
+    return pr
+
+
+def check_spill_addr(pr):
+    """
+    Check if the value has already been spilled
+    :param vr: register we're trying to spill 
+    :return: Returns boolean value
+    """
+    global PrToVr, spilled_bits
+    vr = PrToVr[pr]
+    if (spilled_bits & (1 << vr)) > 0:
+        return True
+    else:
+        return False
+
+
+def check_rematerializable(pr):
+    """
+    Given a physical register will check if the VR corresponding to that VR
+    is rematerializable. 
+
+    :param pr: 
+    :return: True or False value
+    """
+    global PrToVr, rematerializable_bits
+    vr = PrToVr[pr]
+    return (rematerializable_bits & (1 << vr)) > 0
+
+
+def freeAPR(pr):
+    """
+    Will free a pr. Will also add it to the queue.
+    Maintains the appropriate maps to keep them up to date and consistent. 
+    :param pr: pr which we want to free. 
+    :return: 
+    """
+    global VrToPr, PrToVr, PrNu, pr_stack
+    VrToPr[PrToVr[pr]] = -1
+    PrToVr[pr] = -1
+    PrNu[pr] = -1
+    pr_stack.append(pr)
+
 
 def get_defined(opcode):
     """
@@ -1157,31 +872,218 @@ def get_used(opcode):
     else:
         return [0, 4]
 
-####################################################
-
-def get_arg_types(opcode):
-    """
-
-    :param opcode: opcode representing operation we want to print
-    :return: a three part list indicating the type of each respective argument. 
-    0 = constant
-    1 = register
-    None = empty
-    """
-    # operations = ["load", "store","loadI", "add", "sub", "mult",
-    #               "lshift", "rshift", "output", "nop"]
-    if opcode >= 0 and opcode <= 1:
-        return [1, None, 1]
-    if opcode == 2:
-        return [0, None, 1]
-    if opcode >= 3 and opcode <= 7:
-        return [1, 1, 1]
-    if opcode == 8:
-        return [0, None, None]
+def insert_loadi_list(list_node):
+    """"""
+    global LoadI_Head, LoadI_Tail
+    if not LoadI_Head:
+        LoadI_Head = list_node
+        LoadI_Tail = list_node
+        list_node.next = None
+        list_node.prev = None
     else:
-        # NOP or invalid
-        return [None, None, None]
+        LoadI_Tail.link_next(list_node)
+        LoadI_Tail = list_node
+        LoadI_Tail.next = None
 
+
+def spill(x):
+    """
+
+    :param x: the physical register we want to spill
+    :return: 
+    Nothing. 
+    Prints out the necessary ILOC to spill
+    Will also alter our inner mappings to represent this spilling and keep them
+    consistent
+    """
+    global PrToVr, spilled_bits, VrToPr
+    if check_spill_addr(x) or check_rematerializable(x):
+        unmap_pr(x)
+        if verbose:
+            print("pr %d is already in memory" % x)
+        return  # we don't need to spill, as the value is already in spill addr
+    # to spill, we loadI then store
+
+    # record that we've spilled this virtual register
+    spilled_bits = spilled_bits | (1 << PrToVr[x])
+    # now print out!!
+    print("loadI %d => r%d // spill" % (get_spill_addr(PrToVr[x]), k))
+    # note: that we've reserved register k + 1
+    print("store r%d => r%d // spill vr %d" % (x, k, PrToVr[x]))
+    unmap_pr(x)
+
+
+
+def unmap_pr(x):
+    """
+    Will unmap a MAPPED physical register which 
+    we're trying to use for another VR
+    :param x:  physical register
+    :return:  nothing
+    """
+    global PrToVr, VrToPr
+    VrToPr[PrToVr[x]] = -1  # unmap this VR because we're spilling it.
+    PrToVr[x] = -1
+
+
+def restore(vr, pr):
+    """
+    Three different values we can restore:
+        -rematerializable
+        -clean in primary memory (not supported anymore)
+        -clean in spill memory
+
+    :param vr: virtual register which we're trying to restore 
+    :param pr: physical register corresponding to this vr. 
+    :return: 
+    Nothing. 
+    Will print out the ILOC code necessary to restore the value. 
+    """
+    global PrToVr, VrToPr, spilled_bits, Remat_Map, \
+        rematerializable_bits, Vr_Mem_Map
+    PrToVr[pr] = vr
+    VrToPr[vr] = pr
+    if check_rematerializable(pr):
+        # rematerialize the value
+        print("loadI %d => r%d // remat vr%d" % (Remat_Map[vr], pr, vr))
+        return
+
+    print("loadI %d => r%d // restore from spill mem"
+          % (get_spill_addr(vr), k))
+    print("load r%d => r%d // restore vr%d" % (k, pr, PrToVr[pr]))
+
+
+def set_for_alloc():
+    """
+    Resets all the appropriate data structures and variables for if we want to
+    run through another allocation
+    :return: 
+    """
+    global PrNu, VrToPr, PrToVr, pr_stack, MAX_VR
+    PrNu = []
+    VrToPr = []
+    PrToVr = []
+    pr_stack = []
+    for i in range(MAX_VR + 1):
+        VrToPr.append(-1)
+
+    for i in range(k):
+        PrToVr.append(-1)  # represents no mapping
+        PrNu.append(-1)  # -1 represents infinity
+        pr_stack.append(i)  # push free pr's onto stack
+
+
+def reg_alloc(ListHead, defer_loadI):
+    """
+    :param ListHead -- the head of the IR which we want to print out.
+    :param defer_loadI -- True or False indicating whether we want to defer
+    :return: 
+
+    """
+    # note: structure of registers in IR is <SR, VR, PR, NU>
+    global MAX_VR, MAXLIVE, k, pr_stack, VrToPr, \
+        PrToVr, PrNu, Remat_Map, line_num, rematerializable_bits, Vr_Mem_Map, checking
+
+    set_for_alloc()
+
+    line_num = 0
+    curr = ListHead
+    while curr != None:
+        line_num += 1
+        if checking:
+            check_prnu(line_num)  # TODO: comment this call!!
+
+        if verbose:
+            print("on line: %d " % line_num)
+        # we make a single pass through the operations
+        curr_arr = curr.ir_data
+        opcode = curr.opcode
+        if opcode == 9:
+            # we have a NOP
+            curr = curr.next
+            continue
+
+        if opcode == 2:
+            # Special cases for loadI's
+            if curr_arr[11] == -1 and defer_loadI:
+                # no next use of defined
+                temp_curr = curr
+                curr = curr.next
+                temp_curr.remove_self()
+                insert_loadi_list(temp_curr)
+                continue
+            # TODO: why does it break as soon as we do curr = curr.next?
+            # this is why we can't use the next piece of code
+            Remat_Map[curr_arr[9]] = curr_arr[0]
+            rematerializable_bits = rematerializable_bits | (1 << curr_arr[9])
+            # we set up for a value to be rematerialized
+
+            if curr_arr[11] - line_num > 2:
+                # I have no clue why this works for > 2 and note > 1, but
+                # I'm just going for it
+                if verbose:
+                    print("marking as rematerializable")
+                if checking:
+                    check_pr_vr()
+                curr = curr.next  # we choose not to print it now
+                continue
+
+        for i in get_used(opcode):
+            # iterate through the uses and allocate
+            this_pr = VrToPr[curr_arr[i + 1]]
+            if this_pr == -1:
+                # if curr_arr[i + 2] == None:
+                # we assign a PR to those operations that don't have
+                if i == 0:
+                    this_pr = getAPR(curr_arr[i + 1], curr_arr[i + 3], -1)
+                else:
+                    this_pr = getAPR(curr_arr[i + 1], curr_arr[i + 3], curr_arr[2])
+                restore(curr_arr[i + 1], this_pr)
+            curr_arr[i + 2] = this_pr
+
+        for i in get_used(opcode):
+            # check if this is the last use
+            # reiterate over the uses and re-checks if any of them are
+            # the last use of the VR. if so we free the PR
+            if curr_arr[i + 3] > PrNu[curr_arr[i + 2]] \
+                    and PrToVr[curr_arr[i + 2]] == curr_arr[i + 1]:
+                # we make this change here as opposed to the earlier while loop in
+                # order to not prematurely reassign the next use
+
+                # keep this check! It seems trivially true
+                # but we want to cover the case where
+                # an operation uses two of the same registers, the second of which
+                # has a smaller next use
+                PrNu[curr_arr[i + 2]] = curr_arr[i + 3]
+                # Note: we do this assignment because if a VR is already assigned a PR,
+                # we still want to make sure that update the PR's associated new use
+            this_nu = curr_arr[i + 3]
+            if this_nu == -1:
+                # check if this is the last use of this register and free if so
+                free_pr = curr_arr[i + 2]
+                freeAPR(free_pr)
+
+        for i in get_defined(opcode):
+            # allocate definitions
+            # if verbose:
+            #     print_operation(curr, 1)
+            curr_arr[i + 2] = getAPR(curr_arr[i + 1], curr_arr[i + 3], -1)
+        for i in get_defined(opcode):
+            this_nu = curr_arr[i + 3]
+            if this_nu == -1:
+                # check if this is the last use of this register and free if so
+                free_pr = curr_arr[i + 2]
+                freeAPR(free_pr)
+
+        print_operation(curr, 2)
+        print("")
+        if checking:
+            check_pr_vr()
+            check_no_repeat_vr(curr)
+        curr = curr.next
+
+
+####################################################
 
 def init_double_buf():
     """
@@ -1664,8 +1566,8 @@ def parse():
      See end of lecture 3 for a representation
     """
     global IrTail, IrHead, EOF, lex_errors, syntax_errors, tot_block_len
-    # if verbose:
-    #     time_start = datetime.now()
+    if verbose:
+        time_start = datetime.now()
 
     token_list = scan()
     while True:  # while we haven't hit EOF
