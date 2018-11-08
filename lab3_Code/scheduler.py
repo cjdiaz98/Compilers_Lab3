@@ -92,7 +92,7 @@ GRAPH = defaultdict(list)
 REV_GRAPH = defaultdict(list)
 
 
-LATENCY = [3, 3, 1, 1,1,1,1,1,1,1]
+LATENCY = [5, 5, 1, 1,1,3,1,1,1,1]
 
 
 # this is the array containing all the IR's for each operation
@@ -115,6 +115,8 @@ OP_CHILDREN_NUM = []
 vr_val_map = {}
 
 func_unit = [0,1]
+NUM_FU = 2
+
 
 final_schedule = None
 ######## CONSTANTS ABOVE ARE FROM LAB 3 #########
@@ -139,6 +141,45 @@ def check_node_ops2():
                 print(
                 "Operation's vr %d doesn't match vr %d matched to line %d"
                 % (defined_vr, vr, line))
+
+def check_dependences_respected(sched):
+    """
+    
+    :param schedule: list of operations, consisting of line numbers and None (for nops)
+    :return: 
+    Prints out whether we get any violations of our dependences
+    """
+    global OP_PARENTS_NUM, OP_CHILDREN_NUM, GRAPH, REV_GRAPH
+
+    c_count = list(OP_CHILDREN_NUM)
+
+    for pair in sched:
+        for line in pair:
+            if not line:
+                continue
+            if c_count[line] != 0: # check that we don't have any children remaining
+                print("Error - we haven't satisfied all of our dependences for line %d yet" % line)
+            for succ in REV_GRAPH[line]:
+                c_count[succ] -= 1
+    return
+
+def check_FU_valid_ops(sched):
+    """
+    Checks that we don't do any invalid operations on a functional unit
+    :param sched: schedule
+    :return: 
+    """
+    global func_unit
+    for i in range(len(sched)):
+        pair = sched[i]
+        for fu in func_unit:
+            if pair[fu]:
+                if NODE_OPS[pair[fu]].opcode in get_non_func_unit_ops(fu):
+                    print("Error: cycle %d is doing an invalid operation on functional unit %d" % (i + 1, fu))
+
+def print_heap_obj_arr(arr):
+    for i in arr:
+        print(i.val)
 
 ###########  ABOVE IS CODE WE USE TO CHECK OUR DATA STRUCTURES    #####################
 
@@ -240,26 +281,26 @@ def main():
 
     # do lab3 specific part below
     global vr_val_map, NODE_OPS
-
-
-
     lab3()
 
 def lab3():
     global NODE_OPS, tot_block_len, OP_PARENTS_NUM, \
         priorities, predecessor_count, OP_CHILDREN_NUM, successor_count
     assign_line_mappings()
-    OP_PARENTS_NUM = [0] * (tot_block_len + 2)
-    OP_CHILDREN_NUM = [0] * (tot_block_len + 2)
-    NODE_OPS.extend([None] * 2)
-    predecessor_count = [0] * (tot_block_len + 2)
-    successor_count = [0] * (tot_block_len + 2)
-    priorities = [0] * (tot_block_len + 2)
+    OP_PARENTS_NUM = [0] * (tot_block_len + 1)
+    OP_CHILDREN_NUM = [0] * (tot_block_len + 1)
+    predecessor_count = [0] * (tot_block_len + 1)
+    successor_count = [0] * (tot_block_len + 1)
+    priorities = [0] * (tot_block_len + 1)
     # make 1 extra slot just in case we have to make a new root
-    if verbose:
-        print("checking node ops")
-        check_node_ops()
-        check_node_ops2()
+    # print("Length node ops: %d. And then actual list" % len(NODE_OPS) )
+    # print(tot_block_len)
+    # print(NODE_OPS)
+    check_node_ops()
+    check_node_ops2()
+    # if verbose:
+    #     print("checking node ops")
+
     if flag_level == 1:
         schedule()
     else:
@@ -321,7 +362,8 @@ def transform_one_root():
     Will also return the root of the graph.
     :return: 
     """
-    global tot_block_len, GRAPH, NODE_OPS, tot_block_len
+    global tot_block_len, GRAPH, NODE_OPS, tot_block_len, OP_PARENTS_NUM, \
+        priorities, predecessor_count, OP_CHILDREN_NUM, successor_count
     roots = find_roots()
     if len(roots) == 1:
         return roots.pop()
@@ -337,11 +379,15 @@ def transform_one_root():
     # TODO: map the new root to its operation (a NOP) in here
     for root in roots:
         GRAPH[new_root].append(root)
+    priorities.append(0)
+    OP_CHILDREN_NUM.append(0)
+    OP_PARENTS_NUM.append(0)
+    predecessor_count.append(0)
+    successor_count.append(0)
 
     return new_root
 
 # add an edge to each of the roots, so that we only have one root
-
 
 def calc_priorities():
     """
@@ -511,8 +557,13 @@ def check_memop_dependences():
             elif other_mem_addr == other_mem_addr:
                 known = 0
             if conflict_table[get_op_index(curr)][get_op_index(other)][known]:
-                print("memory dependence between ops %d and %d " % (curr.line_num, other.line_num))
+                # print("memory dependence between ops %d and %d " % (curr.line_num, other.line_num))
+                REV_GRAPH[other.line_num].append(curr.line_num)
                 GRAPH[curr.line_num].append(other.line_num)
+                OP_PARENTS_NUM[other.line_num] += 1
+                # increment its parents count
+                OP_CHILDREN_NUM[curr.line_num] += 1
+
             other = other.prev
 
         curr = curr.next
@@ -537,47 +588,86 @@ def get_leaves():
     """
     global OP_CHILDREN_NUM
     leaves = set()
-    for i in range(len(OP_CHILDREN_NUM)):
+    for i in range(1,len(OP_CHILDREN_NUM)):
         if i!= 0 and OP_CHILDREN_NUM[i] == 0:
             leaves.add(i)
+    print("LEAVES")
+    print(leaves)
     return leaves
 
-
-def remove_from_ready(ready_list, func_unit):
+def remove_from_ready2(ready_list, func_unit):
     """"""
+    # elements in ready_list are of form (priority, predecessor_count, line)
+
     NUMBER_RETRIES = 3
     LENGTH_TUP = 3
-    # TODO: alter these if you want to change how we search ^^
-    print("ready_list length: %d" % len(ready_list))
-    print("smallest element:")
-    print(ready_list)
+    # print("ready_list length: %d" % len(ready_list))
+    # print("smallest element:")
+    # print(ready_list)
     unable = []
+    if not ready_list:
+        return None
     top = heappop(ready_list)
 
-    print(" top value line is: %s" % top.val[-1])
-    while ready_list and NODE_OPS[top.val[-1]].opcode in get_non_func_unit_ops(func_unit):
+    # print(" top value line is: %s" % top.val[-1])
+    invalid_ops = get_non_func_unit_ops(func_unit)
+    while top and ready_list and NODE_OPS[top.val[-1]].opcode in invalid_ops:
         unable.append(top)
         top = heappop(ready_list)
+    # print("node line %d" % top.val[-1])
 
-    # if NODE_OPS[top.val[-1]].opcode not in get_unique_func_unit_ops(func_unit):
-    #     # the below code is only for if we want to prioritize the more constrained
-    #     # operations (i.e load, stores, mult's)
-    #     for dum_i in range(NUMBER_RETRIES):
-    #         obj = heappop(ready_list)
-    #         if NODE_OPS[top.val[2]].opcode in get_unique_func_unit_ops(func_unit):
-    #             unable.append(top)
-    #             top = obj
-    #             break
-    #
-    #         else:
-    #             unable.append(obj)
+    if ready_list and NODE_OPS[top.val[-1]].opcode not in get_unique_func_unit_ops(func_unit):
+        # the below code is only for if we want to prioritize the more constrained
+        # operations (i.e load, stores, mult's)
+        unique_ops = get_unique_func_unit_ops(func_unit)
+        # print("trying to constrain to unique operations for func unit %d" % func_unit)
+        for dum_i in range(NUMBER_RETRIES):
+            if ready_list:
+                obj = heappop(ready_list)
+                if NODE_OPS[obj.val[-1]].opcode in unique_ops:
+                    # print("success in finding unique op!")
+                    unable.append(top)
+                    top = obj
+                    break
+
+                else:
+                    unable.append(obj)
     # todo: I'm not sure about this if statement part
 
     # we do this last!!
     for obj in unable:
         heappush(ready_list, obj)
 
-    if NODE_OPS[top.val[-1]] in get_non_func_unit_ops(func_unit):
+    if not top or NODE_OPS[top.val[-1]].opcode in invalid_ops:
+        heappush(ready_list, top)
+        return None
+    else:
+        return top.val[-1]
+
+def remove_from_ready(ready_list, func_unit):
+    """"""
+    # elements in ready_list are of form (priority, predecessor_count, line)
+
+    NUMBER_RETRIES = 3
+    LENGTH_TUP = 3
+    # print("ready_list length: %d" % len(ready_list))
+    # print("smallest element:")
+    # print(ready_list)
+    unable = []
+    if not ready_list:
+        return None
+    top = heappop(ready_list)
+
+    # print(" top value line is: %s" % top.val[-1])
+    invalid_ops = get_non_func_unit_ops(func_unit)
+    while top and ready_list and NODE_OPS[top.val[-1]].opcode in invalid_ops:
+        unable.append(top)
+        top = heappop(ready_list)
+    # we do this last!!
+    for obj in unable:
+        heappush(ready_list, obj)
+
+    if not top or NODE_OPS[top.val[-1]].opcode in invalid_ops:
         heappush(ready_list, top)
         return None
     else:
@@ -644,7 +734,7 @@ def list_schedule():
     for n in leaves:
         heap_obj = MaxHeapObj((priorities[n],
                                     predecessor_count[n], n))
-        print(heap_obj)
+        # print(heap_obj)
         heappush(ready, heap_obj)
 
     if verbose:
@@ -672,7 +762,7 @@ def list_schedule():
             # get the opcode here
             active_op = NODE_OPS[i]
             opcode = active_op.opcode
-            if starts[i] + LATENCY[opcode] < cycle:
+            if starts[i] + LATENCY[opcode] <= cycle:
                 subtract_from_active.add(i)
                 # check if each of the parents are ready
                 for n in REV_GRAPH[i]:
@@ -681,8 +771,8 @@ def list_schedule():
                     # and removed from the ready set
                     if remaining_children[n] == 0:
                         next_obj = MaxHeapObj((priorities[n],
-                                        predecessor_count[n],n))
-                        print(next_obj)
+                                        OP_PARENTS_NUM[n],n))
+                        # print(next_obj)
                         heappush(ready, next_obj)
 
                     elif remaining_children[n] <= 0:
@@ -692,26 +782,37 @@ def list_schedule():
         active = active.difference(subtract_from_active)
 
         if len(ready) > 0:
+            pair = []
+            print("state of ready set:")
+            print_heap_obj_arr(ready)
             for i in func_unit:
                 # remove an op for each functional unit
-                op = remove_from_ready(ready, i)
+                op = remove_from_ready2(ready, i)
+                # op = remove_from_ready(ready, i)
                 if not op:
-                    schedule_list.append(None)
+                    pair.append(None)
+                    continue
 
                 if verbose:
                     print("adding op: %d to schedule" % op)
-                schedule_list.append(op)
-                print(op)
+                # print(op)
                 starts[op] = cycle
                 active.add(op)
-
+                pair.append(op)
+            schedule_list.append(pair)
+            print("pair of ops")
+            print(pair)
         cycle += 1
     return schedule_list
 
 
 def schedule():
-    global final_schedule, GRAPH, def_line, def_line2
+    global final_schedule, GRAPH, REV_GRAPH, def_line, def_line2
     cons_graph()
+    print("Graph")
+    print(GRAPH)
+    print("Reverse graph")
+    print(REV_GRAPH)
     if verbose:
         print("Vr val map")
         print(vr_val_map)
@@ -725,7 +826,9 @@ def schedule():
         print(def_line2)
     calc_priorities()
     final_schedule = list_schedule()
-    print("Final schedule")
+    check_dependences_respected(final_schedule)
+    check_FU_valid_ops(final_schedule)
+    print("Final schedule: takes %d cycles" % len(final_schedule))
     print(final_schedule)
 
 #########################################################
@@ -899,6 +1002,7 @@ def assign_line_mappings():
     # we put none in the first index to
     # account for our lines starting at 1
     while curr:
+        # print("assign line number %d" % line)
         setattr(curr, "line_num", line)
         NODE_OPS.append(curr)
         curr_data = curr.ir_data
@@ -921,7 +1025,7 @@ def rename():
     :return: 
     """
     global IrHead, IrTail, MAXLIVE, MAX_VR, k, NODE_OPS, tot_block_len, def_line, def_line2
-    print("Total block len: %d" % tot_block_len)
+    # print("Total block len: %d" % tot_block_len)
     SrToVr = []
     LU = []
 
@@ -980,10 +1084,6 @@ def rename():
             curr_arr[j + 1] = SrToVr[curr_arr[j]]  # virtual register
             curr_arr[j + 3] = LU[curr_arr[j]]  # next use
             LU[curr_arr[j]] = index
-
-
-        # setattr(curr, "line_num", index) # todo
-        # NODE_OPS.append(curr) # construct mapping of line number to ir object
 
         # we execute these two lines above for the sake
         # of our scheduler's dependence graph construction
