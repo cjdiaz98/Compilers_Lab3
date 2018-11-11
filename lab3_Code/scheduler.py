@@ -88,8 +88,8 @@ def_line2 = []
 
 # GRAPH = pgv.AGraph(strict = True, directed=True)
 # these are have keys as line numbers
-GRAPH = defaultdict(list)
-REV_GRAPH = defaultdict(list)
+GRAPH = defaultdict(dict)
+REV_GRAPH = defaultdict(dict)
 
 
 LATENCY = [5, 5, 1, 1,1,3,1,1,1,1]
@@ -289,6 +289,7 @@ def lab3():
     assign_line_mappings()
     OP_PARENTS_NUM = [0] * (tot_block_len + 1)
     OP_CHILDREN_NUM = [0] * (tot_block_len + 1)
+    NODE_OPS.extend([None])
     predecessor_count = [0] * (tot_block_len + 1)
     successor_count = [0] * (tot_block_len + 1)
     priorities = [0] * (tot_block_len + 1)
@@ -296,8 +297,10 @@ def lab3():
     # print("Length node ops: %d. And then actual list" % len(NODE_OPS) )
     # print(tot_block_len)
     # print(NODE_OPS)
+
     check_node_ops()
     check_node_ops2()
+
     # if verbose:
     #     print("checking node ops")
 
@@ -313,7 +316,6 @@ def cons_graph_viz():
     cons_unweighted_dot_file()
     # pgv_graph = pgv.AGraph(GRAPH) # todo
     # pgv.draw("dotOutput.txt", 'dot')
-
 
 def insert_memop_list(list_node):
     """"""
@@ -351,8 +353,8 @@ def find_roots():
             if new_size != original_size:
                 changed = True
                 break
-    print("roots found")
-    print(nodes)
+    # print("roots found")
+    # print(nodes)
     return nodes # this now contains the set of roots
 
 
@@ -373,12 +375,14 @@ def transform_one_root():
 
     root_op = IRArray(9, None, None, None)
     setattr(root_op, "line_num", tot_block_len + 1)
+    # print("length: %d. blcok len %d" % (len(NODE_OPS), tot_block_len))
     NODE_OPS[tot_block_len + 1] = root_op
 
     new_root = tot_block_len + 1
     # TODO: map the new root to its operation (a NOP) in here
     for root in roots:
-        GRAPH[new_root].append(root)
+        REV_GRAPH[root][new_root] = False
+        GRAPH[new_root][root] = False
     priorities.append(0)
     OP_CHILDREN_NUM.append(0)
     OP_PARENTS_NUM.append(0)
@@ -466,8 +470,6 @@ def add_edge_to_dependences(curr):
 
     used = get_used(curr.opcode)
 
-    if len(used) == 0:
-        GRAPH[curr.line_num] = []
 
     # max number of defined variables is 1 for all our purposes
     for j in used:
@@ -479,9 +481,9 @@ def add_edge_to_dependences(curr):
         if verbose and curr.opcode == 0:
             print(
             "edge added: (%d,%d)" % (curr.line_num, other_ir_obj.line_num))
-        REV_GRAPH[other_ir_obj.line_num].append(curr.line_num)
-        GRAPH[curr.line_num].append(other_ir_obj.line_num)
-        # Add a directed edge between these two
+        REV_GRAPH[other_ir_obj.line_num][curr.line_num] = True
+        GRAPH[curr.line_num][other_ir_obj.line_num] = True
+         # Add a directed edge between these two
 
         OP_PARENTS_NUM[other_ir_obj.line_num] += 1
         # increment its parents count
@@ -557,9 +559,15 @@ def check_memop_dependences():
             elif other_mem_addr == other_mem_addr:
                 known = 0
             if conflict_table[get_op_index(curr)][get_op_index(other)][known]:
+                full_latency = False
+                if curr.opcode in [0,8] and other.opcode == 1:
+                    # then make the edge full latency
+                    full_latency = True
+
                 # print("memory dependence between ops %d and %d " % (curr.line_num, other.line_num))
-                REV_GRAPH[other.line_num].append(curr.line_num)
-                GRAPH[curr.line_num].append(other.line_num)
+                # print(REV_GRAPH[other.line_num])
+                REV_GRAPH[other.line_num][curr.line_num] = full_latency
+                GRAPH[curr.line_num][other.line_num] = full_latency
                 OP_PARENTS_NUM[other.line_num] += 1
                 # increment its parents count
                 OP_CHILDREN_NUM[curr.line_num] += 1
@@ -591,8 +599,8 @@ def get_leaves():
     for i in range(1,len(OP_CHILDREN_NUM)):
         if i!= 0 and OP_CHILDREN_NUM[i] == 0:
             leaves.add(i)
-    print("LEAVES")
-    print(leaves)
+    # print("LEAVES")
+    # print(leaves)
     return leaves
 
 def remove_from_ready2(ready_list, func_unit):
@@ -762,6 +770,26 @@ def list_schedule():
             # get the opcode here
             active_op = NODE_OPS[i]
             opcode = active_op.opcode
+            # print("start of operation %d: %d. End at %d. Currently on cycle %d" %
+            #       (i, starts[i], starts[i] + LATENCY[opcode],cycle))
+            serialized_set = set()
+            for n in REV_GRAPH[i]:
+                if not REV_GRAPH[i][n]:
+                    # note: we'll enter this if-statement on at most one operation
+                    # if a serializable edge, then add it right away
+                    serialized_set.add(n)
+                    remaining_children[n] -= 1
+                    if remaining_children[n] == 0:
+                        next_obj = MaxHeapObj((priorities[n],
+                                        OP_PARENTS_NUM[n],n))
+                        # print(next_obj)
+                        heappush(ready, next_obj)
+
+
+            for n in serialized_set:
+                REV_GRAPH[i].pop(n)
+                # remove all serialized children
+
             if starts[i] + LATENCY[opcode] <= cycle:
                 subtract_from_active.add(i)
                 # check if each of the parents are ready
@@ -781,10 +809,13 @@ def list_schedule():
                 print("error in calculating end cycle of operation")
         active = active.difference(subtract_from_active)
 
-        if len(ready) > 0:
+        if ready or active:
+            # i believe we should keep this if-statement here to avoid
+            # adding things to the schedule
+            # on the final operation
             pair = []
-            print("state of ready set:")
-            print_heap_obj_arr(ready)
+            # print("state of ready set:")
+            # print_heap_obj_arr(ready)
             for i in func_unit:
                 # remove an op for each functional unit
                 op = remove_from_ready2(ready, i)
@@ -800,8 +831,8 @@ def list_schedule():
                 active.add(op)
                 pair.append(op)
             schedule_list.append(pair)
-            print("pair of ops")
-            print(pair)
+            # print("pair of ops")
+            # print(pair)
         cycle += 1
     return schedule_list
 
@@ -809,10 +840,10 @@ def list_schedule():
 def schedule():
     global final_schedule, GRAPH, REV_GRAPH, def_line, def_line2
     cons_graph()
-    print("Graph")
-    print(GRAPH)
-    print("Reverse graph")
-    print(REV_GRAPH)
+    # print("Graph")
+    # print(GRAPH)
+    # print("Reverse graph")
+    # print(REV_GRAPH)
     if verbose:
         print("Vr val map")
         print(vr_val_map)
@@ -828,12 +859,30 @@ def schedule():
     final_schedule = list_schedule()
     check_dependences_respected(final_schedule)
     check_FU_valid_ops(final_schedule)
-    print("Final schedule: takes %d cycles" % len(final_schedule))
-    print(final_schedule)
+    # print("Final schedule: takes %d cycles" % len(final_schedule))
+    # print(final_schedule)
+    print_schedule(final_schedule)
 
 #########################################################
 ######    ALL CODE BELOW HERE IS FOR THE RENAMING PORTION ###########
 #########################################################
+
+def print_schedule(sched):
+    global NUM_FU, NODE_OPS
+    output = ""
+
+    for pair in sched:
+        output += "["
+        for func_unit in range(NUM_FU):
+            if pair[func_unit] == None:
+                output += "nop"
+            else:
+                output += constr_op_string(NODE_OPS[pair[func_unit]],1,False)
+            if func_unit != NUM_FU - 1:
+                output += " ; "
+        output += "] \n"
+    print(output)
+
 
 class IRArray:
     def __init__(self, opcode, int1, int2, int3):
@@ -1111,7 +1160,6 @@ def rename():
         # print(NODE_OPS)
         print("node ops len: %d " % len(NODE_OPS))
 
-
 def print_operation(ir_entry, offset):
     """
 
@@ -1126,7 +1174,6 @@ def print_operation(ir_entry, offset):
         output += " " + constr_op_string(ir_entry, 1, True)
 
     print(output)
-
 
 def constr_op_string(ir_entry, offset, vr):
     """
