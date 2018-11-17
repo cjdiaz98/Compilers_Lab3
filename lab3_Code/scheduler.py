@@ -91,16 +91,14 @@ def_line2 = []
 GRAPH = defaultdict(dict)
 REV_GRAPH = defaultdict(dict)
 
-
-LATENCY = [5, 5, 1, 1,1,3,1,1,1,1]
-
+LATENCY = [5, 5, 1, 1, 1, 3, 1, 1, 1, 1]
 
 # this is the array containing all the IR's for each operation
 # theoretically each IR should contain as line_num the index that holds it in this array
 NODE_OPS = []
-priorities = [] # priorities of each of the nodes
-predecessor_count = [] # keeps track of how many predecessors each node has
-successor_count = [] # keeps track of how many successors each node has
+priorities = []  # priorities of each of the nodes
+predecessor_count = []  # keeps track of how many predecessors each node has
+successor_count = []  # keeps track of how many successors each node has
 # all the above arrays are indexed on line number, with 0 being blank
 
 
@@ -114,20 +112,22 @@ OP_CHILDREN_NUM = []
 
 vr_val_map = {}
 
-func_unit = [0,1]
+func_unit = [0, 1]
 NUM_FU = 2
 
-
 final_schedule = None
+
+
 ######## CONSTANTS ABOVE ARE FROM LAB 3 #########
 ###########  BELOW CODE BELONGS TO LAB 3    #####################
 
 def check_node_ops():
     global NODE_OPS
-    for i in range(1,len(NODE_OPS)):
+    for i in range(1, len(NODE_OPS)):
         if NODE_OPS[i] != None and NODE_OPS[i].line_num != i:
             print("Operation %d  doesn't match its contained IR, which says %d"
                   % (i, NODE_OPS[i].line_num))
+
 
 def check_node_ops2():
     global NODE_OPS, def_line
@@ -139,14 +139,15 @@ def check_node_ops2():
             defined_vr = ir_op.ir_data[defined[0] + 1]
             if defined_vr != vr:
                 print(
-                "Operation's vr %d doesn't match vr %d matched to line %d"
-                % (defined_vr, vr, line))
+                    "Operation's vr %d doesn't match vr %d matched to line %d"
+                    % (defined_vr, vr, line))
+
 
 def check_dependences_respected(sched):
     """
-    
+
     :param schedule: list of operations, consisting of line numbers and None (for nops)
-    :return: 
+    :return:
     Prints out whether we get any violations of our dependences
     """
     global OP_PARENTS_NUM, OP_CHILDREN_NUM, GRAPH, REV_GRAPH
@@ -157,17 +158,20 @@ def check_dependences_respected(sched):
         for line in pair:
             if not line:
                 continue
-            if c_count[line] != 0: # check that we don't have any children remaining
-                print("Error - we haven't satisfied all of our dependences for line %d yet" % line)
+            if c_count[
+                line] != 0:  # check that we don't have any children remaining
+                print(
+                "Error - we haven't satisfied all of our dependences for line %d yet" % line)
             for succ in REV_GRAPH[line]:
                 c_count[succ] -= 1
     return
+
 
 def check_FU_valid_ops(sched):
     """
     Checks that we don't do any invalid operations on a functional unit
     :param sched: schedule
-    :return: 
+    :return:
     """
     global func_unit
     for i in range(len(sched)):
@@ -175,11 +179,15 @@ def check_FU_valid_ops(sched):
         for fu in func_unit:
             if pair[fu]:
                 if NODE_OPS[pair[fu]].opcode in get_non_func_unit_ops(fu):
-                    print("Error: cycle %d is doing an invalid operation on functional unit %d" % (i + 1, fu))
+                    print(
+                    "Error: cycle %d is doing an invalid operation on functional unit %d" % (
+                    i + 1, fu))
+
 
 def print_heap_obj_arr(arr):
     for i in arr:
         print(i.val)
+
 
 ###########  ABOVE IS CODE WE USE TO CHECK OUR DATA STRUCTURES    #####################
 
@@ -197,28 +205,29 @@ def cons_unweighted_dot_file():
                     '{} -> {};\n'.format(parent, child))
         out.write('}\n')
 
+
 def track_operation(ir_op):
     """
-    Will track all of the values in virtual registers. 
-    Will NOT track the values in primary memory. 
-    
+    Will track all of the values in virtual registers.
+    Will NOT track the values in primary memory.
+
     :param ir_op: ir object
-    :return: 
+    :return:
     """
     global vr_val_map
     operation_map = {}
-    operation_map[3] = (lambda x,y: x + y)
-    operation_map[4] = (lambda x,y: x - y)
-    operation_map[5] = (lambda x,y: x * y)
-    operation_map[6] = (lambda x,y: x << y)
-    operation_map[7] = (lambda x,y: x >> y)
+    operation_map[3] = (lambda x, y: x + y)
+    operation_map[4] = (lambda x, y: x - y)
+    operation_map[5] = (lambda x, y: x * y)
+    operation_map[6] = (lambda x, y: x << y)
+    operation_map[7] = (lambda x, y: x >> y)
 
     ir_data = ir_op.ir_data
     defined = get_defined(ir_op.opcode)
     # if verbose and defined:
     #     print("vr at line %d is: %d" % (ir_op.line_num, ir_data[defined[0] + 1]))
 
-    if ir_op.opcode in [8,9,1,0]:
+    if ir_op.opcode in [8, 9, 1, 0]:
         # defines some vr
         for i in get_defined(ir_op.opcode):
             vr_val_map[ir_data[i + 1]] = None
@@ -240,20 +249,20 @@ def track_operation(ir_op):
                 #     print(ir_data)
                 #     print("two VR's: %d and %d" % (vr1, vr2))
                 # all these operations are binary
-                vr_val_map[ir_data[i + 1]] = operation_map[ir_op.opcode]\
-                    (vr_val_map[vr1],vr_val_map[vr2])
+                vr_val_map[ir_data[i + 1]] = operation_map[ir_op.opcode] \
+                    (vr_val_map[vr1], vr_val_map[vr2])
 
 
 def main():
     """
-    Will appropriately read in the file arguments and run the operation that we 
-    want. This might be to run on a single file, or a directory of files. 
-    We can do any one of the following operations: 
+    Will appropriately read in the file arguments and run the operation that we
+    want. This might be to run on a single file, or a directory of files.
+    We can do any one of the following operations:
     -print help options
     -print out all tokens and lexical errors
     -scan and parse
     -scan, parse, and print out the intermediate representation
-    :return: 
+    :return:
     """
     global verbose, flag_level, f, char, EOF, k, MAXLIVE, IrHead, checking
     numArgs = len(sys.argv)
@@ -272,7 +281,6 @@ def main():
         # print out help statement
         return
 
-
     f = open(sys.argv[-1], 'r')
 
     init_double_buf()
@@ -282,6 +290,7 @@ def main():
     # do lab3 specific part below
     global vr_val_map, NODE_OPS
     lab3()
+
 
 def lab3():
     global NODE_OPS, tot_block_len, OP_PARENTS_NUM, \
@@ -298,8 +307,8 @@ def lab3():
     # print(tot_block_len)
     # print(NODE_OPS)
 
-    check_node_ops()
-    check_node_ops2()
+    # check_node_ops() # TODO: UNCOMMENT WHILE TESTING
+    # check_node_ops2()
 
     # if verbose:
     #     print("checking node ops")
@@ -309,6 +318,7 @@ def lab3():
     else:
         cons_graph_viz()
 
+
 def cons_graph_viz():
     global GRAPH
     cons_graph()
@@ -316,6 +326,7 @@ def cons_graph_viz():
     cons_unweighted_dot_file()
     # pgv_graph = pgv.AGraph(GRAPH) # todo
     # pgv.draw("dotOutput.txt", 'dot')
+
 
 def insert_memop_list(list_node):
     """"""
@@ -330,6 +341,7 @@ def insert_memop_list(list_node):
         MemOp_Tail = list_node
         MemOp_Tail.next = None
 
+
 def find_roots():
     """
     Finds the roots of the graph
@@ -341,8 +353,8 @@ def find_roots():
 
     while changed:
         # if verbose:
-            # print("new set nodes")
-            # print(nodes)
+        # print("new set nodes")
+        # print(nodes)
         changed = False
         original_size = len(nodes)
 
@@ -355,14 +367,14 @@ def find_roots():
                 break
     # print("roots found")
     # print(nodes)
-    return nodes # this now contains the set of roots
+    return nodes  # this now contains the set of roots
 
 
 def transform_one_root():
     """
-    Will transform the graph so that there's only one root. 
+    Will transform the graph so that there's only one root.
     Will also return the root of the graph.
-    :return: 
+    :return:
     """
     global tot_block_len, GRAPH, NODE_OPS, tot_block_len, OP_PARENTS_NUM, \
         priorities, predecessor_count, OP_CHILDREN_NUM, successor_count
@@ -383,6 +395,11 @@ def transform_one_root():
     for root in roots:
         REV_GRAPH[root][new_root] = False
         GRAPH[new_root][root] = False
+        # OP_PARENTS_NUM[root] += 1 # PROBABLY DON'T NEED TO DO THIS
+        # # increment its parents count
+        # OP_CHILDREN_NUM[new_root] += 1
+        # # increment its children count
+
     priorities.append(0)
     OP_CHILDREN_NUM.append(0)
     OP_PARENTS_NUM.append(0)
@@ -391,14 +408,15 @@ def transform_one_root():
 
     return new_root
 
+
 # add an edge to each of the roots, so that we only have one root
 
 def calc_priorities():
     """
-    Calculates the priorities of each node. 
-    Runs a latency weighted BFS. 
-    Also will count the number of successors that each node has. 
-    :return: 
+    Calculates the priorities of each node.
+    Runs a latency weighted BFS.
+    Also will count the number of successors that each node has.
+    :return:
     """
     global GRAPH, priorities, OP_PARENTS_NUM, LATENCY, NODE_OPS, \
         predecessor_count, tot_block_len, successor_count
@@ -407,7 +425,7 @@ def calc_priorities():
 
     q = deque()
     q.append(ROOT)
-    parents_num = list.copy(OP_PARENTS_NUM)
+    parents_num = list(OP_PARENTS_NUM)
     priorities[ROOT] = 0
     if verbose:
         print("block len: %d and ROOT: %d" % (tot_block_len, ROOT))
@@ -423,8 +441,8 @@ def calc_priorities():
             parents_num[n] -= 1
             if parents_num[n] == 0:
                 q.append(n)
-            if parents_num[n] < 0:
-                print("Error: this value shouldn't be negative")
+            # if parents_num[n] < 0: # todo: come back to this later when testing
+            #     print("Error: this value shouldn't be negative")
             new_weight = priorities[parent] + LATENCY[ir.opcode]
             predecessor_count[k] += predecessor_count[parent]
 
@@ -446,7 +464,7 @@ def cons_graph():
 
         add_edge_to_dependences(curr)
 
-        if curr.opcode in [0,1,8]:
+        if curr.opcode in [0, 1, 8]:
             # these are the opcodes of the memory-related operations
             # we need to store them in a separate LL for later processing
             temp_curr = curr
@@ -454,22 +472,21 @@ def cons_graph():
             insert_memop_list(temp_curr)
         else:
             curr = curr.next
-    check_memop_dependences()
+    # check_memop_dependences() # TODO: UNCOMMENT WHILE TESTING
     ROOT = transform_one_root()
 
 
 def add_edge_to_dependences(curr):
     """
     Adds an edge from the given operation to all of its dependences
-    :param curr: 
-    :return: 
+    :param curr:
+    :return:
     """
     global GRAPH, priorities, NODE_OPS, def_line, ROOT, REV_GRAPH, \
         OP_CHILDREN_NUM, OP_PARENTS_NUM
     curr_data = curr.ir_data
-
+    line = curr.line_num
     used = get_used(curr.opcode)
-
 
     # max number of defined variables is 1 for all our purposes
     for j in used:
@@ -478,12 +495,12 @@ def add_edge_to_dependences(curr):
         # if verbose:
         #     print("curr line num: %d" % curr.line_num)
         #     print("other line num: %d" % other_ir_obj.line_num)
-        if verbose and curr.opcode == 0:
-            print(
-            "edge added: (%d,%d)" % (curr.line_num, other_ir_obj.line_num))
+        # if verbose and curr.opcode == 0:
+        #     print(
+        #         "edge added: (%d,%d)" % (curr.line_num, other_ir_obj.line_num))
         REV_GRAPH[other_ir_obj.line_num][curr.line_num] = True
         GRAPH[curr.line_num][other_ir_obj.line_num] = True
-         # Add a directed edge between these two
+        # Add a directed edge between these two
 
         OP_PARENTS_NUM[other_ir_obj.line_num] += 1
         # increment its parents count
@@ -491,11 +508,12 @@ def add_edge_to_dependences(curr):
         OP_CHILDREN_NUM[curr.line_num] += 1
         # increment its children count
 
+
 def get_address(ir_op):
     """
     Gets the address corresponding to this operations
-    :param ir_op: 
-    :return: 
+    :param ir_op:
+    :return:
     """
     global vr_val_map
     if ir_op.opcode == 0:
@@ -517,16 +535,18 @@ def get_op_index(ir_op):
     else:
         return None
 
-
 def check_memop_dependences():
     global MemOp_Head, vr_val_map
     curr = MemOp_Head
 
     # Key: load = 0, store = 1, output = 2. Same = 0, Distinct = 1, Unknown = 2
     conflict_table = []
-    conflict_table.append([[False, False, False],[True, False, True],[False, False, False]])
-    conflict_table.append([[True, False, True],[True, False, True],[True, False, True]])
-    conflict_table.append([[False, False, False],[True, False, True],[True, True, True]])
+    conflict_table.append(
+        [[False, False, False], [True, False, True], [False, False, False]])
+    conflict_table.append(
+        [[True, False, True], [True, False, True], [True, False, True]])
+    conflict_table.append(
+        [[False, False, False], [True, False, True], [True, True, True]])
     # should correspond to the 3x3x3 table in lecture
 
     # [False, False, False] # LL, LO, OL
@@ -540,27 +560,28 @@ def check_memop_dependences():
         other = curr.prev
         curr_mem_addr = get_address(curr)
 
-        if curr_mem_addr == None:
+        if curr_mem_addr == None and verbose:
             print("mem addr error")
 
-        if verbose:
-            print_operation(curr, 1)
+        # if verbose: # TODO
+        #     print_operation(curr, 1)
 
         while other:
-            known = 1 # by default say they're distinct
+            known = 1  # by default say they're distinct
             # check for a conflict
-
+            curr_line = curr.line_num
             other_mem_addr = get_address(other)
-            if other_mem_addr == None:
+            if other_mem_addr == None and verbose:
                 print("mem addr error")
 
             if not other_mem_addr:
                 known = 2
             elif other_mem_addr == other_mem_addr:
                 known = 0
-            if conflict_table[get_op_index(curr)][get_op_index(other)][known]:
+            if conflict_table[get_op_index(curr)][get_op_index(other)][known] \
+                    and other.line_num not in GRAPH[curr_line]:
                 full_latency = False
-                if curr.opcode in [0,8] and other.opcode == 1:
+                if curr.opcode in [0, 8] and other.opcode == 1:
                     # then make the edge full latency
                     full_latency = True
 
@@ -576,18 +597,24 @@ def check_memop_dependences():
 
         curr = curr.next
 
+
 class MaxHeapObj(object):
     """
     Object used for ordering the members of the ready set
     """
-    def __init__(self,val): self.val = val
-    def __lt__(self,other):
-      if self.val[0] == other.val[0]:
-        return self.val[1] > other.val[1]
-      return self.val[0] > other.val[0]
-    def __eq__(self,other):
-      return self.val == other.val
+
+    def __init__(self, val): self.val = val
+
+    def __lt__(self, other):
+        if self.val[0] == other.val[0]:
+            return self.val[1] > other.val[1]
+        return self.val[0] > other.val[0]
+
+    def __eq__(self, other):
+        return self.val == other.val
+
     def __str__(self): return str(self.val)
+
 
 def get_leaves():
     """
@@ -596,18 +623,19 @@ def get_leaves():
     """
     global OP_CHILDREN_NUM
     leaves = set()
-    for i in range(1,len(OP_CHILDREN_NUM)):
-        if i!= 0 and OP_CHILDREN_NUM[i] == 0:
+    for i in range(1, len(OP_CHILDREN_NUM)):
+        if i != 0 and OP_CHILDREN_NUM[i] == 0:
             leaves.add(i)
     # print("LEAVES")
     # print(leaves)
     return leaves
 
+
 def remove_from_ready2(ready_list, func_unit):
     """"""
     # elements in ready_list are of form (priority, predecessor_count, line)
 
-    NUMBER_RETRIES = 3
+    NUMBER_RETRIES = 2
     LENGTH_TUP = 3
     # print("ready_list length: %d" % len(ready_list))
     # print("smallest element:")
@@ -624,7 +652,8 @@ def remove_from_ready2(ready_list, func_unit):
         top = heappop(ready_list)
     # print("node line %d" % top.val[-1])
 
-    if ready_list and NODE_OPS[top.val[-1]].opcode not in get_unique_func_unit_ops(func_unit):
+    if ready_list and NODE_OPS[
+        top.val[-1]].opcode not in get_unique_func_unit_ops(func_unit):
         # the below code is only for if we want to prioritize the more constrained
         # operations (i.e load, stores, mult's)
         unique_ops = get_unique_func_unit_ops(func_unit)
@@ -651,6 +680,7 @@ def remove_from_ready2(ready_list, func_unit):
         return None
     else:
         return top.val[-1]
+
 
 def remove_from_ready(ready_list, func_unit):
     """"""
@@ -680,6 +710,7 @@ def remove_from_ready(ready_list, func_unit):
         return None
     else:
         return top.val[-1]
+
 
 # operations = [0 "LOAD", 1 "STORE",2 "LOADI",3 "ADD",4 "SUB", 5"MULT",
 #               6 "LSHIFT", 7 "RSHIFT", 8 "OUTPUT", 9 "NOP",
@@ -711,12 +742,13 @@ def remove_from_ready(ready_list, func_unit):
 def get_unique_func_unit_ops(func_unit):
     """"""
     if func_unit == 0:
-        return [0,1]
+        return [0, 1]
     elif func_unit == 1:
         return [5]
     else:
         print("Error: passed in bad functional unit")
         return []
+
 
 def get_non_func_unit_ops(func_unit):
     """"""
@@ -724,7 +756,7 @@ def get_non_func_unit_ops(func_unit):
         return [5]
         # return [0,1,2,3,4,6,7,8,9]
     elif func_unit == 1:
-        return [0,1]
+        return [0, 1]
         # return [2, 3, 4, 6, 7, 8, 9]
     else:
         print("Error: passed in bad functional unit")
@@ -732,7 +764,7 @@ def get_non_func_unit_ops(func_unit):
 
 
 def list_schedule():
-    global LATENCY, tot_block_len, GRAPH, REV_GRAPH, OP_CHILDREN_NUM, func_unit,\
+    global LATENCY, tot_block_len, GRAPH, REV_GRAPH, OP_CHILDREN_NUM, func_unit, \
         priorities, predecessor_count
 
     cycle = 1
@@ -741,7 +773,7 @@ def list_schedule():
     leaves = get_leaves()
     for n in leaves:
         heap_obj = MaxHeapObj((priorities[n],
-                                    predecessor_count[n], n))
+                               predecessor_count[n], n))
         # print(heap_obj)
         heappush(ready, heap_obj)
 
@@ -751,18 +783,21 @@ def list_schedule():
     active = set()
     starts = [None] * (tot_block_len + 2)
 
-    schedule_list = [] # shows order of operations from first to last
+    schedule_list = []  # shows order of operations from first to last
 
     # TODO: how do we calculate delay of an operation?
-        # is it just latency of an operation? or do we have to calculate differently?
-        #   (see 12.3 in book)
+    # is it just latency of an operation? or do we have to calculate differently?
+    #   (see 12.3 in book)
 
-    remaining_children = list.copy(OP_CHILDREN_NUM)
+    remaining_children = list(OP_CHILDREN_NUM)
     # Two functional units: f0 and f1
     # only f0 can execute load and store
     # only f1 can execute mul
     # only one output operation per cycle
+
     if verbose:
+        print("remaining children before")
+        print(remaining_children)
         print("About to start list scheduling")
     while ready or active:
         subtract_from_active = set()
@@ -774,38 +809,40 @@ def list_schedule():
             #       (i, starts[i], starts[i] + LATENCY[opcode],cycle))
             serialized_set = set()
             for n in REV_GRAPH[i]:
-                if not REV_GRAPH[i][n]:
+                if REV_GRAPH[i][n] == False:
                     # note: we'll enter this if-statement on at most one operation
                     # if a serializable edge, then add it right away
                     serialized_set.add(n)
                     remaining_children[n] -= 1
+                    REV_GRAPH[i][n] = None
                     if remaining_children[n] == 0:
                         next_obj = MaxHeapObj((priorities[n],
-                                        OP_PARENTS_NUM[n],n))
-                        # print(next_obj)
+                                               OP_PARENTS_NUM[n], n))
                         heappush(ready, next_obj)
 
-
-            for n in serialized_set:
-                REV_GRAPH[i].pop(n)
-                # remove all serialized children
+            # for n in serialized_set:
+            #     REV_GRAPH[i].pop(n)
+            #     # remove all serialized children
 
             if starts[i] + LATENCY[opcode] <= cycle:
                 subtract_from_active.add(i)
                 # check if each of the parents are ready
                 for n in REV_GRAPH[i]:
+                    if not REV_GRAPH[i][n]:
+                        continue
                     remaining_children[n] -= 1
                     # a successor is ready if each of its children have been added
                     # and removed from the ready set
                     if remaining_children[n] == 0:
                         next_obj = MaxHeapObj((priorities[n],
-                                        OP_PARENTS_NUM[n],n))
+                                               OP_PARENTS_NUM[n], n))
                         # print(next_obj)
                         heappush(ready, next_obj)
 
-                    elif remaining_children[n] <= 0:
-                        print("error: in decrementing number of processed children")
-            elif starts[i] + LATENCY[opcode] == None:
+                    elif remaining_children[n] <= 0 and verbose:
+                        print(
+                        "error: in decrementing number of processed children")
+            elif starts[i] + LATENCY[opcode] == None and verbose:
                 print("error in calculating end cycle of operation")
         active = active.difference(subtract_from_active)
 
@@ -834,6 +871,17 @@ def list_schedule():
             # print("pair of ops")
             # print(pair)
         cycle += 1
+    if verbose:
+        print("Remaining children list")
+    for i in range(1, len(remaining_children)):
+        if remaining_children[i] == 0:
+            continue
+        if verbose:
+            print("Line %d  has %d more children left" % (i, remaining_children[i]) )
+            print(REV_GRAPH[i])
+    if verbose:
+        print(remaining_children)
+
     return schedule_list
 
 
@@ -847,6 +895,8 @@ def schedule():
     if verbose:
         print("Vr val map")
         print(vr_val_map)
+        print("RevGraph")
+        print(REV_GRAPH)
         print("Graph")
         print(GRAPH)
         print("def line lst")
@@ -857,11 +907,12 @@ def schedule():
         print(def_line2)
     calc_priorities()
     final_schedule = list_schedule()
-    check_dependences_respected(final_schedule)
-    check_FU_valid_ops(final_schedule)
+    # check_dependences_respected(final_schedule) # todo: come back to this later when testing
+    # check_FU_valid_ops(final_schedule) # TODO: UNCOMMENT
     # print("Final schedule: takes %d cycles" % len(final_schedule))
     # print(final_schedule)
     print_schedule(final_schedule)
+
 
 #########################################################
 ######    ALL CODE BELOW HERE IS FOR THE RENAMING PORTION ###########
@@ -877,7 +928,7 @@ def print_schedule(sched):
             if pair[func_unit] == None:
                 output += "nop"
             else:
-                output += constr_op_string(NODE_OPS[pair[func_unit]],1,False)
+                output += constr_op_string(NODE_OPS[pair[func_unit]], 1, False)
             if func_unit != NUM_FU - 1:
                 output += " ; "
         output += "] \n"
@@ -889,12 +940,12 @@ class IRArray:
         """
         Initializes a doubly linked list
 
-        :param opcode: The operation code 
+        :param opcode: The operation code
         :param int1: the value for the first argument to the operation.
         :param int2: the value for the second argument to the operation.
         :param int3: the value for the third argument to the operation.
-        Note that for the above 3 int values we deduce whether they refer to 
-        constants or registers from the operation code. 
+        Note that for the above 3 int values we deduce whether they refer to
+        constants or registers from the operation code.
         They can also be None, indicating that the operation has no such argument
 
         Upon intializing the object, we create the array and fill it in appropriately.
@@ -916,14 +967,14 @@ class IRArray:
 
         :param next_ir: Refers to the IRArray object which we want to link as
         coming after this one
-        :return: 
+        :return:
         """
         next_ir.prev = self
         self.next = next_ir
 
     def sr_to_string(self):
         """
-        :return: 
+        :return:
             Returns the string representation of this IRArray
         """
         global operations
@@ -976,8 +1027,8 @@ class IRArray:
 
     def complete_to_string(self):
         """
-        :return: 
-            Returns the string representation of this IRArray, 
+        :return:
+            Returns the string representation of this IRArray,
             including SR, VR, PR and NU
         """
         global operations
@@ -1002,11 +1053,11 @@ class IRArray:
 
     def remove_self(self):
         """
-        Appropriately removes this node and updates the 
+        Appropriately removes this node and updates the
         head and tail of DLL
 
-        Note: this is only to be used by the main DLL of our allocator. 
-        :return: 
+        Note: this is only to be used by the main DLL of our allocator.
+        :return:
         """
         global IrHead, IrTail
         if not self.prev and not self.next:
@@ -1026,9 +1077,10 @@ class IRArray:
         self.next.prev = self.prev
         self.prev.next = self.next
 
+
 def print_ir():
     """
-    Prints out the intermediate representation in an 
+    Prints out the intermediate representation in an
     "appropriately human readable format"
      Note: also prints out all trailing IRArrays
     :return: None
@@ -1041,6 +1093,7 @@ def print_ir():
         # total_output += "\n" + next_ir.to_string()
         next_ir = next_ir.next
         # print(total_output)
+
 
 def assign_line_mappings():
     global IrHead, def_line, def_line2, NODE_OPS, MAX_VR
@@ -1060,18 +1113,19 @@ def assign_line_mappings():
             vr = curr_data[defined[0] + 1]
             def_line[vr] = line
             if verbose:
-                def_line2.append((vr,line))
+                def_line2.append((vr, line))
 
         curr = curr.next
         line += 1
     if verbose:
         def_line2.sort()
 
+
 def rename():
     """
-        Renames source registers into Live Ranges. 
-        Will print out the output. 
-    :return: 
+        Renames source registers into Live Ranges.
+        Will print out the output.
+    :return:
     """
     global IrHead, IrTail, MAXLIVE, MAX_VR, k, NODE_OPS, tot_block_len, def_line, def_line2
     # print("Total block len: %d" % tot_block_len)
@@ -1160,13 +1214,14 @@ def rename():
         # print(NODE_OPS)
         print("node ops len: %d " % len(NODE_OPS))
 
+
 def print_operation(ir_entry, offset):
     """
 
     :param ir_entry: an IRArray object and member of the doubly linked list
-    :param offset: corresponds to the register type that we want to print out. 
+    :param offset: corresponds to the register type that we want to print out.
     0 = source, 1 = virtual, 2 = physical
-    :return: 
+    :return:
     Nothing, but prints out the operation and its arguments
     """
     output = constr_op_string(ir_entry, offset, False)
@@ -1175,13 +1230,14 @@ def print_operation(ir_entry, offset):
 
     print(output)
 
+
 def constr_op_string(ir_entry, offset, vr):
     """
 
-    :param ir_entry: 
-    :param offset: 
+    :param ir_entry:
+    :param offset:
     :param vr: whether or not we want to include vr representation as a comment
-    :return: 
+    :return:
     """
     operations = ["load", "store", "loadI", "add", "sub", "mult",
                   "lshift", "rshift", "output", "nop"]
@@ -1214,12 +1270,13 @@ def constr_op_string(ir_entry, offset, vr):
         output += "=> %s%d" % (r_string, data[8 + offset])
     return output
 
+
 def print_renamed_ir():
     """
-        Will print out the IR after it's been renamed. 
-        The new ILOC will look identical to the old one, except that each register 
-        is defined exactly once. 
-    :return: 
+        Will print out the IR after it's been renamed.
+        The new ILOC will look identical to the old one, except that each register
+        is defined exactly once.
+    :return:
     """
     global IrHead
     # TODO: first implement it so that it only prints out the virtual
@@ -1230,24 +1287,26 @@ def print_renamed_ir():
         print_operation(curr, 1)
         curr = curr.next
 
+
 def check_whole_no_repeat_vr(head):
     """
     Checks (after allocation) that no operation has any two different VR's
-    with the same physical register. 
+    with the same physical register.
     And if it does, it'll print out the operation and its location.
-    :return: 
+    :return:
     """
     curr = head
     while curr:
         check_no_repeat_vr(curr)
         curr = curr.next
 
+
 def check_no_repeat_vr(curr):
     """
     Checks (after allocation) that no operation has any two different VR's
-    with the same physical register. 
+    with the same physical register.
     And if it does, it'll print out the operation and its location.
-    :return: 
+    :return:
     """
 
     curr_data = curr.ir_data
@@ -1257,15 +1316,17 @@ def check_no_repeat_vr(curr):
             # check if the VR are not the same
             if curr_data[used[0] + 2] == curr_data[used[1] + 2]:
                 # then check if the PR are the same
-                print("ERROR: Physical register reused for two uses in an operation")
+                print(
+                "ERROR: Physical register reused for two uses in an operation")
                 print_operation(curr, 2)
+
 
 def get_defined(opcode):
     """
         Gives us the indices of the defined registers corresponding to a given
         opcode
-        :param opcode: operation code. 
-        :return: 
+        :param opcode: operation code.
+        :return:
         A list of indices
     """
     # operations = [0 "LOAD", 1 "STORE",2 "LOADI",3 "ADD",4 "SUB", 5"MULT",
@@ -1284,8 +1345,8 @@ def get_used(opcode):
     """
         Gives us the indices of the used registers corresponding to a given
         opcode
-        :param opcode: operation code. 
-        :return: 
+        :param opcode: operation code.
+        :return:
     A list of indices
     """
     # operations = [0 "LOAD", 1 "STORE",2 "LOADI",3 "ADD",4 "SUB", 5"MULT",
@@ -1304,13 +1365,14 @@ def get_used(opcode):
     else:
         return [0, 4]
 
+
 ####################################################
 
 def get_arg_types(opcode):
     """
 
     :param opcode: opcode representing operation we want to print
-    :return: a three part list indicating the type of each respective argument. 
+    :return: a three part list indicating the type of each respective argument.
     0 = constant
     1 = register
     None = empty
@@ -1332,8 +1394,8 @@ def get_arg_types(opcode):
 
 def init_double_buf():
     """
-    Will initialize the double buffer to be ready for reading. 
-    :return: 
+    Will initialize the double buffer to be ready for reading.
+    :return:
     """
     global i, buf1, buf2, buf1_len, buf2_len, f, EOF
     EOF = False
@@ -1346,9 +1408,9 @@ def init_double_buf():
 
 def get_char():
     """
-    Sets char to whatever's at the index i. Appropriately searches in 
+    Sets char to whatever's at the index i. Appropriately searches in
     buf1 or buf2
-    :return: 
+    :return:
     """
     global BUF_SIZE, i, char, buf1, buf2
     if i < buf1_len:
@@ -1361,10 +1423,10 @@ def get_char():
 def next_char():
     """
         See pg 71 of the TB for a reference implementation
-        Will also keep the buffer filled if necessary    
+        Will also keep the buffer filled if necessary
         Note that the only time that we should set char to "" is if we've hit EOF
         Otherwise, we'll always return the next character
-    :return: 
+    :return:
         Returns nothing, but updates the global var char
     """
     global i, buf1, buf2, char, buf1_len, buf2_len, EOF, f, BUF_SIZE
@@ -1411,11 +1473,11 @@ def next_char():
 
 def rollback():
     """
-        Will signal rollback error if index falls behind the fence. 
-    :param i: the current index in the buffer 
-    :return: 
-        Will return -1 if i == fence and can no longer be rolled back. 
-        Else will return 0. 
+        Will signal rollback error if index falls behind the fence.
+    :param i: the current index in the buffer
+    :return:
+        Will return -1 if i == fence and can no longer be rolled back.
+        Else will return 0.
     """
     global i, char
     if i <= 0:
@@ -1427,10 +1489,10 @@ def rollback():
 
 
 def detect_int():
-    """    
-        Detects and appends to the end of the constructed string 
-        whatever integer we find in scanning. 
-        Also advances the character pointer in the buffer. 
+    """
+        Detects and appends to the end of the constructed string
+        whatever integer we find in scanning.
+        Also advances the character pointer in the buffer.
     :return:
         -1 if no integer was found.
         else returns a 0.
@@ -1472,7 +1534,7 @@ def is_number(s):
     got from below link:
     https://stackoverflow.com/questions/354038/how-do-i-check-if-a-string-is-a-number-float
 
-    :param s: the string in question 
+    :param s: the string in question
     :return: true or false
     """
     try:
@@ -1485,7 +1547,7 @@ def is_number(s):
 def to_int(str_num):
     """
     :param str_num: a number represented as a string
-    :return: 
+    :return:
     returns the integer representation of the string
     """
     # TODO: make efficient string to integer conversion --> is python's way good?
@@ -1499,13 +1561,13 @@ def to_int(str_num):
 
 def scan():
     """
-    Currently uses single buffering. Will read in things line-by-line     
-    :return: 
-        Will return a list of <line, category, lexeme> triple-lists, 
+    Currently uses single buffering. Will read in things line-by-line
+    :return:
+        Will return a list of <line, category, lexeme> triple-lists,
         of the types <int, int, string>, respectively
         This list will be empty if there are any invalid tokens in the line.
 
-    Note: this function also reports any lexical errors. 
+    Note: this function also reports any lexical errors.
     It will report all lexical errors on a line
     It is assumed that whatever text follows a lexical error and is unseparated
     by whitespace is also part of that same error
@@ -1782,7 +1844,7 @@ def print_token_list(token_list):
     """
     Prints out a list of tokens in the form line: <category, lexeme>
     :param token: token of format (line, category, lexeme)
-    :return: 
+    :return:
     Nothing
     """
     num_to_cat = ["MEMOP", "MEMOP", "LOADI", "ARITHOP", "ARITHOP", "ARITHOP",
@@ -1804,10 +1866,10 @@ def parse():
     Creates the intermediate representation of the ILOC
     :param token_list: list of tokens from the scanning phase
         of the form <line, category, lexeme>
-        We need the line number to accurately 
+        We need the line number to accurately
         report any errors in the input file
-    :return: 
-     IR form is a doubly-linked list of arrays. 
+    :return:
+     IR form is a doubly-linked list of arrays.
      See end of lecture 3 for a representation
     """
     global IrTail, IrHead, EOF, lex_errors, syntax_errors, tot_block_len
@@ -1883,14 +1945,14 @@ def parse():
 def finish_memop(token_list):
     """
     Opcode: 0 or 1
-    :param token_list: list of tokens, starting with a MEMOP token. 
-    The token list isn't guaranteed to have the right number of tokens. 
-    :return: 
-    If successful parsing, then returns an IRArray object. 
+    :param token_list: list of tokens, starting with a MEMOP token.
+    The token list isn't guaranteed to have the right number of tokens.
+    :return:
+    If successful parsing, then returns an IRArray object.
     Else, returns None
 
-    Is expected to print out error statements 
-    to diagnose faults with the token list. 
+    Is expected to print out error statements
+    to diagnose faults with the token list.
     """
     global syntax_errors
 
@@ -1935,8 +1997,8 @@ def finish_memop(token_list):
 def finish_loadI(token_list):
     """
     Opcode: 2
-    :param token_list: 
-    :return: 
+    :param token_list:
+    :return:
     """
     global syntax_errors
     valid = True
