@@ -269,6 +269,8 @@ def main():
 
     if "-v" in sys.argv:
         verbose = True
+    if "-r" in sys.argv:
+        flag_level = 3
     if "-g" in sys.argv:
         flag_level = 2
     if "-h" in sys.argv:
@@ -277,7 +279,9 @@ def main():
     if numArgs < 2 or numArgs > 4 or flag_level == 0:
         print("Note: invoke schedule as follows:"
               "schedule -g(optional) <filename> or \n schedule <filename>")
-        print("Valid flags are -h for help, -g to generate a graphviz dot file")
+        print("Valid flags are -h for help, -g to generate a graphviz dot file. "
+              "-r to rename as in lab2"
+              "Put no flag if you want to schedule the block.")
         # print out help statement
         return
 
@@ -286,6 +290,8 @@ def main():
     init_double_buf()
     parse()
     rename()  # do the renaming regardless
+    if flag_level == 3:
+        print_renamed_ir()
 
     # do lab3 specific part below
     global vr_val_map, NODE_OPS
@@ -472,7 +478,7 @@ def cons_graph():
             insert_memop_list(temp_curr)
         else:
             curr = curr.next
-    # check_memop_dependences() # TODO: UNCOMMENT WHILE TESTING
+    add_memop_dependences()
     ROOT = transform_one_root()
 
 
@@ -487,10 +493,13 @@ def add_edge_to_dependences(curr):
     curr_data = curr.ir_data
     line = curr.line_num
     used = get_used(curr.opcode)
-
+    added = set()
     # max number of defined variables is 1 for all our purposes
     for j in used:
+
         other_line = def_line[curr_data[j + 1]]
+        if other_line in added:
+            continue
         other_ir_obj = NODE_OPS[other_line]
         # if verbose:
         #     print("curr line num: %d" % curr.line_num)
@@ -498,8 +507,8 @@ def add_edge_to_dependences(curr):
         # if verbose and curr.opcode == 0:
         #     print(
         #         "edge added: (%d,%d)" % (curr.line_num, other_ir_obj.line_num))
-        REV_GRAPH[other_ir_obj.line_num][curr.line_num] = True
-        GRAPH[curr.line_num][other_ir_obj.line_num] = True
+        REV_GRAPH[other_line][curr.line_num] = True
+        GRAPH[curr.line_num][other_line] = True
         # Add a directed edge between these two
 
         OP_PARENTS_NUM[other_ir_obj.line_num] += 1
@@ -507,6 +516,7 @@ def add_edge_to_dependences(curr):
 
         OP_CHILDREN_NUM[curr.line_num] += 1
         # increment its children count
+        added.add(other_line)
 
 
 def get_address(ir_op):
@@ -535,7 +545,7 @@ def get_op_index(ir_op):
     else:
         return None
 
-def check_memop_dependences():
+def add_memop_dependences():
     global MemOp_Head, vr_val_map
     curr = MemOp_Head
 
@@ -873,12 +883,13 @@ def list_schedule():
         cycle += 1
     if verbose:
         print("Remaining children list")
-    for i in range(1, len(remaining_children)):
-        if remaining_children[i] == 0:
-            continue
-        if verbose:
-            print("Line %d  has %d more children left" % (i, remaining_children[i]) )
-            print(REV_GRAPH[i])
+    # for i in range(1, len(remaining_children)): # TODO: UNCOMMENT WHEN TESTING
+    #     if remaining_children[i] == 0:
+    #         continue
+    #     if verbose:
+    #         print("Line %d  has %d more children left. See all children below" % (i, remaining_children[i]) )
+    #         print(GRAPH[i])
+    #         # print(REV_GRAPH[i])
     if verbose:
         print(remaining_children)
 
@@ -1525,8 +1536,11 @@ def skip_comment():
     """
     global char
     next_char()
+    comment = "//"
     while char != "\n" and char != "":
+        comment += char
         next_char()
+    print(comment)
 
 
 def is_number(s):
